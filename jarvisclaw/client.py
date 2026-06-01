@@ -98,56 +98,79 @@ class JarvisClawClient:
         amount = payment_req.get("amount", payment_req.get("maxAmountRequired", "0"))
         network = payment_req.get("network", self.network)
         max_timeout = payment_req.get("maxTimeoutSeconds", 300)
+        asset = payment_req.get("asset", "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913")
+        description = payment_req.get("description", "API request")
 
         nonce = self._generate_nonce()
-        valid_after = int(time.time()) - 60
+        valid_after = int(time.time()) - 600  # 10 min before (clock skew)
         valid_before = int(time.time()) + max_timeout
 
         # EIP-3009 TransferWithAuthorization signature (USDC on Base)
         chain_id_map = {"base": 8453, "base-sepolia": 84532}
         chain_id = chain_id_map.get(network, int(network.split(":")[1]) if ":" in network else 8453)
 
-        domain = {
-            "name": "USD Coin",
-            "version": "2",
-            "chainId": chain_id,
-            "verifyingContract": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-        }
-
-        types = {
-            "TransferWithAuthorization": [
-                {"name": "from", "type": "address"},
-                {"name": "to", "type": "address"},
-                {"name": "value", "type": "uint256"},
-                {"name": "validAfter", "type": "uint256"},
-                {"name": "validBefore", "type": "uint256"},
-                {"name": "nonce", "type": "bytes32"},
-            ]
-        }
-
-        message = {
-            "from": self.account.address,
-            "to": pay_to,
-            "value": int(amount),
-            "validAfter": valid_after,
-            "validBefore": valid_before,
-            "nonce": bytes.fromhex(nonce[2:]),
-        }
+        usdc_name = "USD Coin"
+        usdc_version = "2"
 
         # Sign EIP-712 typed data
         from eth_account.messages import encode_typed_data
-        signable = encode_typed_data(
-            domain_data=domain,
-            message_types={"TransferWithAuthorization": types["TransferWithAuthorization"]},
-            message_data=message,
-        )
+        full_message = {
+            "types": {
+                "EIP712Domain": [
+                    {"name": "name", "type": "string"},
+                    {"name": "version", "type": "string"},
+                    {"name": "chainId", "type": "uint256"},
+                    {"name": "verifyingContract", "type": "address"},
+                ],
+                "TransferWithAuthorization": [
+                    {"name": "from", "type": "address"},
+                    {"name": "to", "type": "address"},
+                    {"name": "value", "type": "uint256"},
+                    {"name": "validAfter", "type": "uint256"},
+                    {"name": "validBefore", "type": "uint256"},
+                    {"name": "nonce", "type": "bytes32"},
+                ],
+            },
+            "primaryType": "TransferWithAuthorization",
+            "domain": {
+                "name": usdc_name,
+                "version": usdc_version,
+                "chainId": chain_id,
+                "verifyingContract": asset,
+            },
+            "message": {
+                "from": self.account.address,
+                "to": pay_to,
+                "value": int(amount),
+                "validAfter": valid_after,
+                "validBefore": valid_before,
+                "nonce": bytes.fromhex(nonce[2:]),
+            },
+        }
+
+        signable = encode_typed_data(full_message=full_message)
         signed = self.account.sign_message(signable)
 
-        # Build x402 payment payload
+        # Build x402 v2 payment payload (matching BlockRun SDK format)
         payload = {
-            "x402Version": 1,
-            "scheme": "exact",
-            "network": network,
+            "x402Version": 2,
+            "resource": {
+                "url": resource_url,
+                "description": description,
+                "mimeType": "application/json",
+            },
+            "accepted": {
+                "scheme": "exact",
+                "network": network,
+                "amount": amount,
+                "asset": asset,
+                "payTo": pay_to,
+                "maxTimeoutSeconds": max_timeout,
+                "extra": {
+                    "name": usdc_name,
+                    "version": usdc_version,
+                },
+            },
             "payload": {
                 "signature": "0x" + signed.signature.hex(),
                 "authorization": {
@@ -159,7 +182,6 @@ class JarvisClawClient:
                     "nonce": nonce,
                 },
             },
-            "resource": resource_url,
         }
 
         payload_json = json.dumps(payload, separators=(",", ":"))
