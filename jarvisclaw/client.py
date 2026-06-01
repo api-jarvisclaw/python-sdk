@@ -152,8 +152,11 @@ class JarvisClawClient:
         signed = self.account.sign_message(signable)
 
         # Build x402 v2 payment payload (matching BlockRun SDK format)
+        # Include scheme/network at top level for mark3labs/x402-go compatibility
         payload = {
             "x402Version": 2,
+            "scheme": "exact",
+            "network": network,
             "resource": {
                 "url": resource_url,
                 "description": description,
