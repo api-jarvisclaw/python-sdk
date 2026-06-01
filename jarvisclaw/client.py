@@ -16,7 +16,7 @@ from eth_account import Account
 from eth_account.messages import encode_typed_data
 
 DEFAULT_BASE_URL = "https://api.jarvisclaw.ai"
-DEFAULT_NETWORK = "base"
+DEFAULT_NETWORK = "eip155:8453"
 
 
 class JarvisClawClient:
@@ -106,7 +106,7 @@ class JarvisClawClient:
         valid_before = int(time.time()) + max_timeout
 
         # EIP-3009 TransferWithAuthorization signature (USDC on Base)
-        chain_id_map = {"base": 8453, "base-sepolia": 84532}
+        chain_id_map = {"base": 8453, "base-sepolia": 84532, "eip155:8453": 8453, "eip155:84532": 84532}
         chain_id = chain_id_map.get(network, int(network.split(":")[1]) if ":" in network else 8453)
 
         usdc_name = "USD Coin"
