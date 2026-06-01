@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "jarvisclaw"
+version = "0.1.0"
+description = "JarvisClaw AI & Prediction Market SDK — x402 machine payments"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.9"
+dependencies = [
+    "requests>=2.28",
+    "eth-account>=0.10",
+    "eth-abi>=4.0",
+]
+
+[project.urls]
+Homepage = "https://jarvisclaw.ai"
+Documentation = "https://api.jarvisclaw.ai/docs"
