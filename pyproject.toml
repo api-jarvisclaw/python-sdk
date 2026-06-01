@@ -1,11 +1,11 @@
-﻿[build-system]
+[build-system]
 requires = ["setuptools>=68.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "jarvisclaw"
 version = "0.1.3"
-description = "JarvisClaw AI & Prediction Market SDK 鈥?x402 machine payments"
+description = "JarvisClaw AI & Prediction Market SDK — x402 machine payments"
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.9"
