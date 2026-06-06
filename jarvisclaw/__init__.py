@@ -1,6 +1,7 @@
-"""JarvisClaw AI SDK — Chat, Images, Video, Search, Prediction Market."""
-from jarvisclaw.client import LLMClient
-from jarvisclaw.errors import (
+"""JarvisClaw AI SDK — per-capability Client classes for Chat, Video, Image, Audio, Search."""
+from .audio import AudioClient
+from .chat import ChatClient
+from .errors import (
     APIError,
     AuthenticationError,
     InsufficientBalanceError,
@@ -8,9 +9,20 @@ from jarvisclaw.errors import (
     PaymentError,
     RateLimitError,
 )
+from .image import ImageClient
+from .marketplace import MarketplaceClient
+from .search import SearchClient
+from .types import MusicJob
+from .video import VideoClient
 
 __all__ = [
-    "LLMClient",
+    "ChatClient",
+    "VideoClient",
+    "ImageClient",
+    "AudioClient",
+    "SearchClient",
+    "MarketplaceClient",
+    "MusicJob",
     "JarvisClawError",
     "APIError",
     "AuthenticationError",
@@ -18,4 +30,4 @@ __all__ = [
     "InsufficientBalanceError",
     "PaymentError",
 ]
-__version__ = "0.2.0"
+__version__ = "1.0.0"

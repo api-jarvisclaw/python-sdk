@@ -1,4 +1,4 @@
-"""x402 payment signing logic (EIP-712 / EIP-3009)."""
+"""x402 EVM payment signing (EIP-712 / EIP-3009) — v2 format."""
 from __future__ import annotations
 
 import base64
@@ -20,7 +20,7 @@ CHAIN_ID_MAP = {
 
 
 class X402Signer:
-    """Signs x402 payment payloads using EIP-712 typed data."""
+    """Signs x402 EVM payment payloads using EIP-712 typed data."""
 
     def __init__(self, private_key: str, network: str = DEFAULT_NETWORK):
         try:
@@ -38,30 +38,46 @@ class X402Signer:
         return self._account.address
 
     def sign_from_402(self, resp, resource_url: str) -> str:
-        """Parse 402 response and return base64 payment signature."""
+        """Parse 402 response, find EVM payment option, and return base64 signature."""
         body = resp.json()
-        if "payments" in body and len(body["payments"]) > 0:
-            payment = body["payments"][0]
-            resource = body.get("resource", {})
-        else:
-            payment = body
-            resource = {}
+        payments = body.get("payments", [])
+        resource = body.get("resource", {})
+
+        # Find the EVM payment option
+        payment = None
+        for p in payments:
+            if p.get("network", "").startswith("eip155:"):
+                payment = p
+                break
+        if payment is None:
+            payment = payments[0] if payments else body
 
         pay_to = payment.get("payTo", "")
-        amount = payment.get("amount", payment.get("maxAmountRequired", "0"))
+        amount = str(payment.get("amount", payment.get("maxAmountRequired", "0")))
         network = payment.get("network", self.network)
         max_timeout = payment.get("maxTimeoutSeconds", 300)
         asset = payment.get("asset", USDC_CONTRACT)
+        extra = payment.get("extra", {})
         description = resource.get("description", "API request")
+
+        if not pay_to:
+            raise ValueError("x402: server returned empty payTo address")
+        if int(amount) <= 0:
+            raise ValueError("x402: invalid payment amount (must be positive)")
+        if int(amount) > 100_000_000:  # 100 USDC safety cap
+            raise ValueError(f"x402: amount {amount} exceeds safety cap (100 USDC)")
+        if asset.lower() != USDC_CONTRACT.lower():
+            raise ValueError(f"x402: unexpected asset {asset}, expected USDC")
 
         return self._sign_payment(
             pay_to=pay_to, amount=amount, network=network,
-            max_timeout=max_timeout, asset=asset,
+            max_timeout=max_timeout, asset=asset, extra=extra,
             resource_url=resource_url, description=description,
         )
 
     def _sign_payment(
-        self, *, pay_to, amount, network, max_timeout, asset, resource_url, description
+        self, *, pay_to, amount, network, max_timeout, asset, extra,
+        resource_url, description
     ) -> str:
         from eth_account.messages import encode_typed_data
 
@@ -110,10 +126,9 @@ class X402Signer:
         signable = encode_typed_data(full_message=full_message)
         signed = self._account.sign_message(signable)
 
+        # x402 v2 format (matches BlockRun)
         payload = {
             "x402Version": 2,
-            "scheme": "exact",
-            "network": network,
             "resource": {
                 "url": resource_url,
                 "description": description,
@@ -122,23 +137,24 @@ class X402Signer:
             "accepted": {
                 "scheme": "exact",
                 "network": network,
-                "amount": amount,
+                "amount": str(int(amount)),
                 "asset": asset,
                 "payTo": pay_to,
                 "maxTimeoutSeconds": max_timeout,
-                "extra": {"name": USDC_NAME, "version": USDC_VERSION},
+                "extra": extra if extra else {"name": USDC_NAME, "version": USDC_VERSION},
             },
             "payload": {
                 "signature": "0x" + signed.signature.hex(),
                 "authorization": {
                     "from": self._account.address,
                     "to": pay_to,
-                    "value": amount,
+                    "value": str(int(amount)),
                     "validAfter": str(valid_after),
                     "validBefore": str(valid_before),
                     "nonce": nonce,
                 },
             },
+            "extensions": {},
         }
 
         return base64.b64encode(

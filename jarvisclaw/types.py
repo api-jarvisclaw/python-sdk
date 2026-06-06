@@ -1,5 +1,17 @@
 """Response types for JarvisClaw SDK."""
+from __future__ import annotations
+
+import atexit
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from ._base import BaseClient
+
+# Shared thread pool for non-blocking operations
+_pool = ThreadPoolExecutor(max_workers=8, thread_name_prefix="jarvisclaw")
+atexit.register(_pool.shutdown, wait=False)
 
 
 @dataclass
@@ -35,6 +47,41 @@ class AudioResponse:
     """Response from audio_speech."""
     content: bytes = b""
     content_type: str = "audio/mpeg"
+
+
+@dataclass
+class MusicJob:
+    """Non-blocking music generation handle.
+
+    Usage:
+        job = audio.music("An electronic beat", wait=False)
+        # ... do other work ...
+        result = job.result()  # blocks until ready
+    """
+    _future: Future | None = field(default=None, repr=False)
+
+    def result(self, timeout: float | None = 300) -> AudioResponse:
+        """Block until the music is ready and return AudioResponse."""
+        if self._future is None:
+            raise RuntimeError("MusicJob has no pending operation")
+        return self._future.result(timeout=timeout)
+
+    @property
+    def done(self) -> bool:
+        """Check if generation has completed without blocking."""
+        return self._future is not None and self._future.done()
+
+    @classmethod
+    def _submit(cls, client: BaseClient, path: str, body: dict[str, Any]) -> MusicJob:
+        """Submit music generation in background thread."""
+        def _do():
+            resp = client._post_raw(path, json=body, timeout=300)
+            return AudioResponse(
+                content=resp.content,
+                content_type=resp.headers.get("content-type", "audio/mpeg"),
+            )
+        future = _pool.submit(_do)
+        return cls(_future=future)
 
 
 @dataclass
