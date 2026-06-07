@@ -92,7 +92,7 @@ class TestAutoTTS:
         from jarvisclaw import AudioClient
 
         audio = AudioClient(api_key=API_KEY, base_url=BASE_URL)
-        result = audio.speech("Hello world, this is a test.", voice="alloy")
+        result = audio.speech("Hello world, this is a test.", voice="sarah")
         assert result.content is not None
         assert isinstance(result.content, bytes)
         assert len(result.content) > 1000, f"Audio too small: {len(result.content)} bytes"
@@ -104,7 +104,7 @@ class TestAutoTTS:
         from jarvisclaw import AudioClient
 
         audio = AudioClient(private_key=WALLET_KEY, base_url=BASE_URL)
-        result = audio.speech("Test audio output", voice="alloy")
+        result = audio.speech("Test audio output", voice="sarah")
         assert result.content is not None
         assert isinstance(result.content, bytes)
         assert len(result.content) > 1000
@@ -147,29 +147,25 @@ class TestMarketplace:
         from jarvisclaw import MarketplaceClient
 
         mc = MarketplaceClient(api_key=API_KEY, base_url=BASE_URL)
-        result = mc.call("surf", "/exchange/prices?symbol=BTC")
+        result = mc.call("surf", "/exchange/price?pair=BTC-USDT")
         assert isinstance(result, dict), f"Expected dict, got {type(result)}: {result}"
 
     @pytest.mark.timeout(30)
-    def test_data_apikey(self):
+    def test_market_ranking_apikey(self):
+        """Test Surf market ranking endpoint."""
         from jarvisclaw import MarketplaceClient
 
         mc = MarketplaceClient(api_key=API_KEY, base_url=BASE_URL)
-        result = mc.call("data", "/crypto/price/BTC-USD")
+        result = mc.call("surf", "/market/ranking")
         assert result is not None
 
     @pytest.mark.timeout(30)
-    def test_dex_apikey(self):
+    def test_news_feed_apikey(self):
+        """Test Surf news feed endpoint."""
         from jarvisclaw import MarketplaceClient
 
         mc = MarketplaceClient(api_key=API_KEY, base_url=BASE_URL)
-        result = mc.call(
-            "dex",
-            "/price?chainId=8453"
-            "&sellToken=0x4200000000000000000000000000000000000006"
-            "&buyToken=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
-            "&sellAmount=1000000000000000000",
-        )
+        result = mc.call("surf", "/news/feed")
         assert result is not None
 
     @skip_no_wallet
@@ -178,7 +174,7 @@ class TestMarketplace:
         from jarvisclaw import MarketplaceClient
 
         mc = MarketplaceClient(private_key=WALLET_KEY, base_url=BASE_URL)
-        result = mc.call("surf", "/exchange/prices?symbol=ETH")
+        result = mc.call("surf", "/exchange/price?pair=ETH-USDT")
         assert isinstance(result, dict)
 
     @skip_no_wallet
@@ -191,6 +187,6 @@ class TestMarketplace:
             "exa",
             "/search",
             method="POST",
-            json={"query": "latest AI news", "num_results": 3},
+            json={"query": "latest AI news", "numResults": 3},
         )
         assert result is not None

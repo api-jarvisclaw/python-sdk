@@ -297,13 +297,26 @@ class AsyncAudioClient(AsyncBaseClient):
         resp = await self._post_raw("/v1/audio/generations", json={"model": model, "prompt": prompt, "instrumental": instrumental, **kwargs}, timeout=300)
         return AudioResponse(content=resp.content, content_type=resp.headers.get("content-type", "audio/mpeg"))
 
-    async def speech(self, text: str, *, model: str = "auto/tts", voice: str = "alloy") -> AudioResponse:
+    async def speech(self, text: str, *, model: str = "auto/tts", voice: str = "sarah") -> AudioResponse:
         resp = await self._post_raw("/v1/audio/speech", json={"model": model, "input": text, "voice": voice})
-        return AudioResponse(content=resp.content, content_type=resp.headers.get("content-type", "audio/mpeg"))
+        # BlockRun returns JSON with URL instead of raw audio
+        content_type = resp.headers.get("content-type", "")
+        if "application/json" in content_type:
+            try:
+                import json as _json
+                data = _json.loads(resp.content)
+                items = data.get("data", [])
+                if items and isinstance(items[0], dict) and items[0].get("url"):
+                    audio_url = items[0]["url"]
+                    audio_resp = await self._session.get(audio_url, timeout=60)
+                    return AudioResponse(
+                        content=audio_resp.content,
+                        content_type=audio_resp.headers.get("content-type", "audio/mpeg"),
+                    )
+            except Exception:
+                pass
+        return AudioResponse(content=resp.content, content_type=content_type or "audio/mpeg")
 
-    async def transcribe(self, audio_file: Any, *, model: str = "whisper-1") -> str:
-        data = await self._post("/v1/audio/transcriptions", files={"file": audio_file}, data={"model": model})
-        return data.get("text", "")
 
 
 # ─── Search ───────────────────────────────────────────────────

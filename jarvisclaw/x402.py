@@ -39,8 +39,21 @@ class X402Signer:
 
     def sign_from_402(self, resp, resource_url: str) -> str:
         """Parse 402 response, find EVM payment option, and return base64 signature."""
-        body = resp.json()
-        payments = body.get("payments", [])
+        import base64 as _b64
+
+        # x402 payment info can be in header (base64) or body JSON
+        body = {}
+        payment_header = resp.headers.get("payment-required", "") or resp.headers.get("x-payment-required", "")
+        if payment_header:
+            try:
+                body = json.loads(_b64.b64decode(payment_header))
+            except Exception:
+                body = resp.json()
+        else:
+            body = resp.json()
+
+        # x402 v2 uses "accepts", v1 uses "payments"
+        payments = body.get("accepts", body.get("payments", []))
         resource = body.get("resource", {})
 
         # Find the EVM payment option

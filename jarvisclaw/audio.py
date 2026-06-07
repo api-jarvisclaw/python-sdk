@@ -53,9 +53,29 @@ class AudioClient(BaseClient):
             return MusicJob._submit(self, "/v1/audio/generations", body)
 
         resp = self._post_raw("/v1/audio/generations", json=body, timeout=300)  # Music generation takes 1-3 minutes on upstream
+
+        # Some providers return JSON with a URL instead of raw audio
+        content_type = resp.headers.get("content-type", "")
+        if "application/json" in content_type:
+            try:
+                data = resp.json()
+                # Format: {"data": [{"url": "https://...mp3"}]}
+                items = data.get("data", [])
+                if items and isinstance(items[0], dict) and items[0].get("url"):
+                    audio_url = items[0]["url"]
+                    import requests as _requests
+                    audio_resp = _requests.get(audio_url, timeout=60)
+                    audio_resp.raise_for_status()
+                    return AudioResponse(
+                        content=audio_resp.content,
+                        content_type=audio_resp.headers.get("content-type", "audio/mpeg"),
+                    )
+            except Exception:
+                pass  # Fall through to raw content
+
         return AudioResponse(
             content=resp.content,
-            content_type=resp.headers.get("content-type", "audio/mpeg"),
+            content_type=content_type or "audio/mpeg",
         )
 
     def speech(
@@ -63,34 +83,40 @@ class AudioClient(BaseClient):
         text: str,
         *,
         model: str = "auto/tts",
-        voice: str = "alloy",
+        voice: str = "sarah",
     ) -> AudioResponse:
         """Text-to-speech — returns audio bytes.
 
         Args:
             text: Text to synthesize.
             model: TTS model identifier.
-            voice: Voice to use (alloy, echo, fable, onyx, nova, shimmer).
+            voice: Voice alias or ElevenLabs voice_id (sarah, george, etc.).
         """
         resp = self._post_raw(
             "/v1/audio/speech",
             json={"model": model, "input": text, "voice": voice},
         )
+
+        # BlockRun returns JSON with URL instead of raw audio
+        content_type = resp.headers.get("content-type", "")
+        if "application/json" in content_type:
+            try:
+                data = resp.json()
+                items = data.get("data", [])
+                if items and isinstance(items[0], dict) and items[0].get("url"):
+                    audio_url = items[0]["url"]
+                    import requests as _requests
+                    audio_resp = _requests.get(audio_url, timeout=60)
+                    audio_resp.raise_for_status()
+                    return AudioResponse(
+                        content=audio_resp.content,
+                        content_type=audio_resp.headers.get("content-type", "audio/mpeg"),
+                    )
+            except Exception:
+                pass
+
         return AudioResponse(
             content=resp.content,
-            content_type=resp.headers.get("content-type", "audio/mpeg"),
+            content_type=content_type or "audio/mpeg",
         )
 
-    def transcribe(self, audio_file: Any, *, model: str = "whisper-1") -> str:
-        """Speech-to-text — returns transcript text.
-
-        Args:
-            audio_file: Audio file (file-like object).
-            model: Transcription model identifier.
-        """
-        data = self._post(
-            "/v1/audio/transcriptions",
-            files={"file": audio_file},
-            data={"model": model},
-        )
-        return data.get("text", "")

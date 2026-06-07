@@ -55,6 +55,21 @@ class ChatClient(BaseClient):
         model = model or "auto"
         body: dict[str, Any] = {"model": model, "messages": messages, **kwargs}
         data = self._post("/v1/chat/completions", json=body)
+
+        # Handle search response format (auto/search returns {summary} not {choices})
+        if "summary" in data and "choices" not in data:
+            usage = data.get("usage", {})
+            if usage:
+                self._track_cost(model, "/v1/chat/completions", usage)
+            return ChatResponse(
+                content=data["summary"],
+                model=data.get("model", model),
+                id=data.get("id", ""),
+                usage=usage,
+                raw=data,
+            )
+
+        # Standard chat format
         content = ""
         choices = data.get("choices", [])
         if choices:
