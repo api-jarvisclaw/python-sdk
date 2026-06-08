@@ -97,13 +97,13 @@ class MarketplaceClient(BaseClient):
 
     def defi_protocol(self, slug: str, **kwargs: Any) -> Any:
         """Get data for a specific DeFi protocol by slug."""
-        return self.call("defi", f"protocols/{slug}", method="GET", **kwargs)
+        return self.call("defi", f"protocol/{slug}", method="GET", **kwargs)
 
     def defi_yields(self, **kwargs: Any) -> Any:
         """Get current yield/APY data across DeFi protocols."""
         return self.call("defi", "yields", method="GET", **kwargs)
 
     def defi_tvl(self, **kwargs: Any) -> Any:
-        """Get historical TVL data."""
-        return self.call("defi", "tvl", method="GET", **kwargs)
+        """Get TVL data (alias for protocols)."""
+        return self.call("defi", "protocols", method="GET", **kwargs)
 
