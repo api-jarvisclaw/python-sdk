@@ -16,6 +16,7 @@ USDC_DECIMALS = 6
 TOKEN_PROGRAM_ID = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
 ASSOCIATED_TOKEN_PROGRAM_ID = "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
 COMPUTE_BUDGET_PROGRAM_ID = "ComputeBudget111111111111111111111111111111"
+MEMO_PROGRAM_ID = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr"
 
 FALLBACK_RPC = "https://api.mainnet-beta.solana.com"
 
@@ -132,8 +133,27 @@ class SolanaX402Signer:
         ).decode()
 
     def _get_blockhash(self, base_url: str) -> str:
-        """Fetch latest blockhash from server proxy, fallback to public RPC."""
-        # Try server proxy first
+        """Fetch latest blockhash directly from Solana RPC.
+
+        Uses public RPC directly to ensure freshness — server proxy may cache
+        stale blockhashes that CDP facilitator rejects during simulation.
+        """
+        rpc_payload = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "getLatestBlockhash",
+            "params": [{"commitment": "finalized"}],
+        }
+        try:
+            resp = requests.post(FALLBACK_RPC, json=rpc_payload, timeout=10)
+            result = resp.json().get("result", {}).get("value", {})
+            bh = result.get("blockhash", "")
+            if bh:
+                return bh
+        except Exception:
+            pass
+
+        # Fallback: try server proxy if RPC fails
         if base_url:
             try:
                 resp = requests.get(
@@ -144,21 +164,9 @@ class SolanaX402Signer:
             except Exception:
                 pass
 
-        # Fallback to public RPC
-        rpc_payload = {
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "getLatestBlockhash",
-            "params": [{"commitment": "finalized"}],
-        }
-        resp = requests.post(FALLBACK_RPC, json=rpc_payload, timeout=10)
-        result = resp.json().get("result", {}).get("value", {})
-        bh = result.get("blockhash", "")
-        if not bh:
-            raise RuntimeError(
-                "Failed to get Solana blockhash from all sources"
-            )
-        return bh
+        raise RuntimeError(
+            "Failed to get Solana blockhash from all sources"
+        )
 
     def _build_partial_tx(
         self, *, amount: int, mint: str, recipient: str,
@@ -205,7 +213,13 @@ class SolanaX402Signer:
             ],
         )
 
-        instructions = [ix_cu_limit, ix_cu_price, ix_transfer]
+        # Instruction 3: Memo (random nonce for transaction uniqueness — required by facilitator)
+        import os
+        memo_nonce = os.urandom(16).hex().encode()
+        memo_program = Pubkey.from_string(MEMO_PROGRAM_ID)
+        ix_memo = Instruction(memo_program, memo_nonce, [])
+
+        instructions = [ix_cu_limit, ix_cu_price, ix_transfer, ix_memo]
 
         # Build MessageV0
         recent_blockhash = SolHash.from_string(blockhash)
@@ -235,8 +249,9 @@ class SolanaX402Signer:
         if our_index is None:
             raise RuntimeError("Our pubkey not found in transaction signers")
 
-        # Sign the message
-        sig_bytes = self._keypair.sign_message(bytes(msg))
+        # Sign the message (V0 messages require 0x80 version prefix for signing)
+        msg_bytes_with_version = bytes([0x80]) + bytes(msg)
+        sig_bytes = self._keypair.sign_message(msg_bytes_with_version)
         sigs[our_index] = sig_bytes
 
         tx = VersionedTransaction.populate(msg, sigs)
