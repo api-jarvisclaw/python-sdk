@@ -213,8 +213,33 @@ class SolanaX402Signer:
             fee_payer_pk, instructions, [], recent_blockhash
         )
 
-        # Create partially-signed transaction
-        tx = VersionedTransaction(msg, [self._keypair])
+        # Create partially-signed transaction.
+        # The message has 2 signers: fee_payer (server) + payer (us).
+        # We sign our part; the server signs theirs when verifying the payment.
+        from solders.signature import Signature as SolSignature
+        from solders.transaction import VersionedTransaction
+
+        # Determine signer positions: fee_payer is always index 0 in MessageV0
+        num_signers = msg.header.num_required_signatures
+        # Pre-fill all signature slots with empty (null) signatures
+        empty_sig = SolSignature.default()
+        sigs = [empty_sig] * num_signers
+
+        # Sign with our keypair — find our index in the account keys
+        our_pubkey = self._keypair.pubkey()
+        our_index = None
+        for i in range(num_signers):
+            if msg.account_keys[i] == our_pubkey:
+                our_index = i
+                break
+        if our_index is None:
+            raise RuntimeError("Our pubkey not found in transaction signers")
+
+        # Sign the message
+        sig_bytes = self._keypair.sign_message(bytes(msg))
+        sigs[our_index] = sig_bytes
+
+        tx = VersionedTransaction.populate(msg, sigs)
 
         # Serialize to base64
         tx_bytes = bytes(tx)

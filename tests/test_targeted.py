@@ -282,10 +282,9 @@ class TestDeFi:
         assert isinstance(result, dict)
 
     @skip_no_wallet
-    @pytest.mark.timeout(60)
-    @pytest.mark.skip(reason="BlockRun yields response is 10MB+, causes JSON parse truncation")
+    @pytest.mark.timeout(120)
     def test_defi_yields(self):
-        """Get yield/APY data."""
+        """Get yield/APY data (large response ~15MB)."""
         from jarvisclaw import MarketplaceClient
 
         mc = MarketplaceClient(private_key=WALLET_KEY, base_url=BASE_URL)
