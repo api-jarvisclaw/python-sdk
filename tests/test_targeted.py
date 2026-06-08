@@ -190,3 +190,122 @@ class TestMarketplace:
             json={"query": "latest AI news", "numResults": 3},
         )
         assert result is not None
+
+
+# --- 6. RPC (Multi-chain JSON-RPC) ---
+
+
+class TestRPC:
+    """Multi-chain RPC marketplace service."""
+
+    @skip_no_wallet
+    @pytest.mark.timeout(30)
+    def test_rpc_eth_block_number(self):
+        """eth_blockNumber on Ethereum mainnet."""
+        from jarvisclaw import MarketplaceClient
+
+        mc = MarketplaceClient(private_key=WALLET_KEY, base_url=BASE_URL)
+        result = mc.rpc_call("ethereum", "eth_blockNumber")
+        assert isinstance(result, dict), f"Expected dict, got {type(result)}: {result}"
+        assert "result" in result or "error" not in result
+
+    @skip_no_wallet
+    @pytest.mark.timeout(30)
+    def test_rpc_eth_gas_price(self):
+        """eth_gasPrice on Ethereum mainnet."""
+        from jarvisclaw import MarketplaceClient
+
+        mc = MarketplaceClient(private_key=WALLET_KEY, base_url=BASE_URL)
+        result = mc.rpc_call("ethereum", "eth_gasPrice")
+        assert isinstance(result, dict)
+        assert "result" in result
+
+    @skip_no_wallet
+    @pytest.mark.timeout(30)
+    def test_rpc_base_chain(self):
+        """eth_blockNumber on Base chain."""
+        from jarvisclaw import MarketplaceClient
+
+        mc = MarketplaceClient(private_key=WALLET_KEY, base_url=BASE_URL)
+        result = mc.rpc_call("base", "eth_blockNumber")
+        assert isinstance(result, dict)
+
+    @skip_no_wallet
+    @pytest.mark.timeout(30)
+    def test_rpc_batch(self):
+        """Batch RPC call — multiple methods in one request."""
+        from jarvisclaw import MarketplaceClient
+
+        mc = MarketplaceClient(private_key=WALLET_KEY, base_url=BASE_URL)
+        results = mc.rpc_batch("ethereum", [
+            ("eth_blockNumber", []),
+            ("eth_gasPrice", []),
+        ])
+        assert isinstance(results, list), f"Expected list, got {type(results)}"
+        assert len(results) == 2
+
+    @pytest.mark.timeout(30)
+    def test_rpc_apikey(self):
+        """RPC with API key auth."""
+        from jarvisclaw import MarketplaceClient
+
+        mc = MarketplaceClient(api_key=API_KEY, base_url=BASE_URL)
+        result = mc.rpc_call("ethereum", "eth_blockNumber")
+        assert isinstance(result, dict)
+
+
+# --- 7. DeFi Data (DefiLlama) ---
+
+
+class TestDeFi:
+    """DefiLlama DeFi protocol data marketplace service."""
+
+    @skip_no_wallet
+    @pytest.mark.timeout(30)
+    def test_defi_protocols(self):
+        """Get all DeFi protocols with TVL."""
+        from jarvisclaw import MarketplaceClient
+
+        mc = MarketplaceClient(private_key=WALLET_KEY, base_url=BASE_URL)
+        result = mc.defi_protocols()
+        assert result is not None
+
+    @skip_no_wallet
+    @pytest.mark.timeout(30)
+    def test_defi_protocol_aave(self):
+        """Get specific protocol data (Aave)."""
+        from jarvisclaw import MarketplaceClient
+
+        mc = MarketplaceClient(private_key=WALLET_KEY, base_url=BASE_URL)
+        result = mc.defi_protocol("aave")
+        assert result is not None
+        assert isinstance(result, dict)
+
+    @skip_no_wallet
+    @pytest.mark.timeout(30)
+    def test_defi_yields(self):
+        """Get yield/APY data."""
+        from jarvisclaw import MarketplaceClient
+
+        mc = MarketplaceClient(private_key=WALLET_KEY, base_url=BASE_URL)
+        result = mc.defi_yields()
+        assert result is not None
+
+    @skip_no_wallet
+    @pytest.mark.timeout(30)
+    def test_defi_tvl(self):
+        """Get historical TVL data."""
+        from jarvisclaw import MarketplaceClient
+
+        mc = MarketplaceClient(private_key=WALLET_KEY, base_url=BASE_URL)
+        result = mc.defi_tvl()
+        assert result is not None
+
+    @pytest.mark.timeout(30)
+    def test_defi_protocols_apikey(self):
+        """DeFi protocols with API key auth."""
+        from jarvisclaw import MarketplaceClient
+
+        mc = MarketplaceClient(api_key=API_KEY, base_url=BASE_URL)
+        result = mc.defi_protocols()
+        assert result is not None
