@@ -147,7 +147,12 @@ class AsyncBaseClient:
             text = _text
             def json(self): return _json_data
 
-        signature = self._auth._signer.sign_from_402(_Resp(), url)
+        # Dispatch to the correct signer — Solana needs base_url as third arg
+        from ..auth import SolanaX402Auth
+        if isinstance(self._auth, SolanaX402Auth):
+            signature = self._auth._signer.sign_from_402(_Resp(), url, self.base_url)
+        else:
+            signature = self._auth._signer.sign_from_402(_Resp(), url)
         if not signature:
             return None
         headers = kwargs.pop("headers", {}) or {}
@@ -265,14 +270,14 @@ class AsyncVideoClient(AsyncBaseClient):
     async def generate(self, prompt: str, *, model: str | None = None, duration: int = 5, wait: bool = True, poll_interval: float = 5.0, poll_timeout: float = 600.0, **kwargs) -> VideoJob:
         model = model or "auto/video"
         data = await self._post("/v1/videos/generations", json={"model": model, "prompt": prompt, "duration": duration, **kwargs})
-        job = VideoJob(id=data.get("id", ""), status=data.get("status", "in_progress"), url=data.get("url", ""), raw=data)
+        job = VideoJob(id=data.get("id", ""), status=data.get("status", "in_progress"), url=_extract_video_url_async(data), raw=data)
         if not wait or job.status == "completed" or job.url:
             return job
         return await self._poll(job.id, poll_interval, poll_timeout)
 
     async def status(self, job_id: str) -> VideoJob:
         data = await self._get(f"/v1/videos/generations/{job_id}")
-        return VideoJob(id=data.get("id", job_id), status=data.get("status", ""), url=data.get("url", ""), raw=data)
+        return VideoJob(id=data.get("id", job_id), status=data.get("status", ""), url=_extract_video_url_async(data), raw=data)
 
     async def _poll(self, job_id: str, interval: float, timeout: float) -> VideoJob:
         start = time.monotonic()
@@ -295,20 +300,15 @@ class AsyncAudioClient(AsyncBaseClient):
     async def music(self, prompt: str, *, model: str | None = None, instrumental: bool = False, **kwargs) -> AudioResponse:
         model = model or "auto/music"
         resp = await self._post_raw("/v1/audio/generations", json={"model": model, "prompt": prompt, "instrumental": instrumental, **kwargs}, timeout=300)
-        return AudioResponse(content=resp.content, content_type=resp.headers.get("content-type", "audio/mpeg"))
-
-    async def speech(self, text: str, *, model: str = "auto/tts", voice: str = "sarah") -> AudioResponse:
-        resp = await self._post_raw("/v1/audio/speech", json={"model": model, "input": text, "voice": voice})
-        # BlockRun returns JSON with URL instead of raw audio
+        # Some providers return JSON with a URL instead of raw audio
         content_type = resp.headers.get("content-type", "")
         if "application/json" in content_type:
             try:
-                import json as _json
                 data = _json.loads(resp.content)
                 items = data.get("data", [])
                 if items and isinstance(items[0], dict) and items[0].get("url"):
                     audio_url = items[0]["url"]
-                    audio_resp = await self._session.get(audio_url, timeout=60)
+                    audio_resp = await self._client.get(audio_url, timeout=60)
                     return AudioResponse(
                         content=audio_resp.content,
                         content_type=audio_resp.headers.get("content-type", "audio/mpeg"),
@@ -316,6 +316,48 @@ class AsyncAudioClient(AsyncBaseClient):
             except Exception:
                 pass
         return AudioResponse(content=resp.content, content_type=content_type or "audio/mpeg")
+
+    async def speech(self, text: str, *, model: str = "auto/tts", voice: str = "sarah") -> AudioResponse:
+        resp = await self._post_raw("/v1/audio/speech", json={"model": model, "input": text, "voice": voice})
+        # BlockRun returns JSON with URL instead of raw audio
+        content_type = resp.headers.get("content-type", "")
+        if "application/json" in content_type:
+            try:
+                data = _json.loads(resp.content)
+                items = data.get("data", [])
+                if items and isinstance(items[0], dict) and items[0].get("url"):
+                    audio_url = items[0]["url"]
+                    audio_resp = await self._client.get(audio_url, timeout=60)
+                    return AudioResponse(
+                        content=audio_resp.content,
+                        content_type=audio_resp.headers.get("content-type", "audio/mpeg"),
+                    )
+            except Exception:
+                pass
+        return AudioResponse(content=resp.content, content_type=content_type or "audio/mpeg")
+
+    async def transcribe(self, file, *, model: str = "whisper-1", language: str | None = None) -> str:
+        """Transcribe audio to text.
+
+        Args:
+            file: Audio file (file-like object or path).
+            model: Transcription model. Defaults to "whisper-1".
+            language: Optional language hint (ISO 639-1, e.g. "en").
+        """
+        data_fields: dict = {"model": model}
+        if language:
+            data_fields["language"] = language
+        files = {"file": file}
+        # httpx uses 'data' for form fields alongside 'files'
+        url = self.base_url + "/v1/audio/transcriptions"
+        headers = self._auth.prepare_headers({})
+        resp = await self._client.post(url, data=data_fields, files=files, headers=headers, timeout=self.timeout)
+        if resp.status_code >= 400:
+            body = self._safe_json(resp)
+            from ..errors import APIError
+            raise APIError(resp.status_code, body.get("error", {}).get("message", "Transcription failed"), body)
+        result = resp.json()
+        return result.get("text", "")
 
 
 
@@ -343,26 +385,56 @@ class AsyncSearchClient(AsyncBaseClient):
         return []
 
     async def find_similar(self, url: str, *, num_results: int = 10) -> list[SearchResult]:
-        data = await self._post("/v1/search/similar", json={
-            "model": "auto/search",
-            "messages": [{"role": "user", "content": f"Find pages similar to: {url}"}],
-            "max_results": num_results,
+        data = await self._post("/v1/marketplace/exa/findSimilar", json={
+            "url": url,
+            "numResults": num_results,
         })
         results = data.get("results", data.get("data", []))
         if results:
-            return [SearchResult(title=r.get("title", ""), url=r.get("url", ""), snippet=r.get("snippet", "")) for r in results]
-        content = ""
-        choices = data.get("choices", [])
-        if choices:
-            content = choices[0].get("message", {}).get("content", "")
-        if content:
-            return [SearchResult(title="Search Result", url="", snippet=content)]
+            return [SearchResult(title=r.get("title", ""), url=r.get("url", ""), snippet=r.get("text", r.get("snippet", ""))) for r in results]
         return []
 
     async def contents(self, urls: list[str]) -> list[Any]:
-        data = await self._post("/v1/search/contents", json={
-            "model": "auto/search",
-            "messages": [{"role": "user", "content": f"Get contents of: {', '.join(urls)}"}],
-            "urls": urls,
+        data = await self._post("/v1/marketplace/exa/contents", json={
+            "ids": urls,
         })
         return data.get("results", data.get("data", []))
+
+
+# ─── Marketplace ─────────────────────────────────────────────
+
+class AsyncMarketplaceClient(AsyncBaseClient):
+    """Async marketplace client for generic service calls."""
+
+    async def call(self, service: str, path: str, *, method: str = "GET", **kwargs) -> Any:
+        """Make a generic marketplace API call.
+
+        Args:
+            service: Service name (e.g., "polymarket", "dex", "phone").
+            path: API path within the service.
+            method: HTTP method (GET, POST, etc.).
+            **kwargs: Additional request params (json, data, params, etc.).
+        """
+        full_path = f"/v1/marketplace/{service.strip('/')}/{path.lstrip('/')}"
+        m = method.upper()
+        if m == "GET":
+            return await self._get(full_path, **kwargs)
+        return await self._post(full_path, **kwargs)
+
+    async def rpc_call(self, chain: str, method: str, params: Any = None) -> Any:
+        """Send a JSON-RPC 2.0 request to a blockchain."""
+        body = {"jsonrpc": "2.0", "id": 1, "method": method, "params": params or []}
+        return await self.call("rpc", chain, method="POST", json=body)
+
+
+def _extract_video_url_async(data: dict) -> str:
+    """Extract video URL from response — handles both top-level and nested formats."""
+    url = data.get("url", "")
+    if url:
+        return url
+    items = data.get("data")
+    if isinstance(items, list) and len(items) > 0:
+        url = items[0].get("url", "") if isinstance(items[0], dict) else ""
+        if url:
+            return url
+    return ""

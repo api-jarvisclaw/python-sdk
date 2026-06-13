@@ -61,7 +61,8 @@ class SolanaX402Signer:
     def sign_from_402(self, resp, resource_url: str, base_url: str) -> str:
         """Parse 402 response, find Solana option, build tx, return base64 signature."""
         body = resp.json()
-        payments = body.get("payments", [])
+        # x402 v2 uses "accepts", v1 uses "payments"
+        payments = body.get("accepts", body.get("payments", []))
         resource = body.get("resource", {})
 
         # Find Solana payment option

@@ -143,35 +143,6 @@ result = image.edit(open("photo.png", "rb"), "Remove the background")
 print(result.url)
 ```
 
-### ImageClient async (asyncio)
-
-```python
-import asyncio
-from jarvisclaw.aio import ImageClient
-
-async def main():
-    async with ImageClient(private_key="0x...") as image:
-        # Blocking
-        result = await image.generate("A cat")
-        print(result.url)
-
-        # Non-blocking
-        job = await image.generate("A dog", wait=False)
-        # ... do other async work ...
-        result = await image.status(job.raw["id"])
-
-        # Concurrent generation
-        results = await asyncio.gather(
-            image.generate("A sunrise"),
-            image.generate("A sunset"),
-            image.generate("A moonrise"),
-        )
-        for r in results:
-            print(r.url)
-
-asyncio.run(main())
-```
-
 ---
 
 ## VideoClient
@@ -231,39 +202,6 @@ result = video.wait(job.id)
 print(f"Done! URL: {result.url}")
 ```
 
-### VideoClient async (asyncio)
-
-```python
-import asyncio
-from jarvisclaw.aio import VideoClient
-
-async def main():
-    async with VideoClient(private_key="0x...") as video:
-        # Blocking
-        job = await video.generate("Sunset over mountains")
-        print(job.url)
-
-        # Non-blocking
-        job = await video.generate("Waves crashing", wait=False)
-        print(f"Submitted: {job.id}")
-        # ... do other async work ...
-
-        # Wait when ready
-        result = await video.status(job.id)  # single check
-        # or block:
-        # result = await video.wait(job.id)  # NOT YET IN ASYNC (use generate with wait=True)
-
-        # Concurrent
-        jobs = await asyncio.gather(
-            video.generate("A cat"),
-            video.generate("A dog"),
-        )
-        for j in jobs:
-            print(j.url)
-
-asyncio.run(main())
-```
-
 ---
 
 ## AudioClient
@@ -309,31 +247,17 @@ result = audio.speech("Hello world", voice="alloy")
 with open("speech.mp3", "wb") as f:
     f.write(result.content)
 
-# Available voices: alloy, echo, fable, onyx, nova, shimmer
+# Available voices: alloy, echo, fable, onyx, nova, shimmer, sarah, george
 result = audio.speech("Good morning", model="tts-1", voice="nova")
 
-# ─── transcribe() — always blocking ───
+# ─── transcribe() — speech-to-text ───
 with open("recording.mp3", "rb") as f:
     text = audio.transcribe(f)
 print(text)  # "Hello, this is a test recording."
-```
 
-### AudioClient async (asyncio)
-
-```python
-import asyncio
-from jarvisclaw.aio import AudioClient
-
-async def main():
-    async with AudioClient(private_key="0x...") as audio:
-        # Concurrent music + speech
-        music, speech = await asyncio.gather(
-            audio.music("Jazz piano"),
-            audio.speech("Hello world", voice="nova"),
-        )
-        # music.content, speech.content are bytes
-
-asyncio.run(main())
+# With language hint
+with open("chinese_audio.mp3", "rb") as f:
+    text = audio.transcribe(f, language="zh")
 ```
 
 ---
@@ -351,19 +275,19 @@ from jarvisclaw import SearchClient
 
 search = SearchClient(private_key="0x...")
 
-# ─── query() ───
+# ─── query() — web search ───
 results = search.query("latest AI news", num_results=5)
 for r in results:
     print(f"{r.title}")
     print(f"  {r.url}")
     print(f"  {r.snippet}")
 
-# ─── find_similar() ───
+# ─── find_similar() — find pages similar to a URL ───
 similar = search.find_similar("https://example.com/article")
 for r in similar:
     print(r.title, r.url)
 
-# ─── contents() ───
+# ─── contents() — extract page content ───
 pages = search.contents(["https://example.com/page1", "https://example.com/page2"])
 for page in pages:
     print(page)  # full page content dict
@@ -377,24 +301,44 @@ for page in pages:
 |--------|---------|----------|
 | `call(service, path)` | `dict` | Yes |
 | `call(service, path, method="POST")` | `dict` | Yes |
+| `rpc_call(chain, method, params)` | `dict` | Yes |
+| `rpc_batch(chain, calls)` | `list` | Yes |
+| `defi_protocols()` | `dict` | Yes |
+| `defi_protocol(slug)` | `dict` | Yes |
+| `defi_yields()` | `dict` | Yes |
 
 ```python
 from jarvisclaw import MarketplaceClient
 
 mp = MarketplaceClient(private_key="0x...")
 
-# ─── GET request ───
-markets = mp.call("polymarket", "markets?sort=volume&limit=10")
-for m in markets.get("markets", []):
-    print(f"{m['question']}: {m['volume']}")
+# ─── Generic service call ───
+prices = mp.call("surf", "/exchange/price?pair=BTC-USDT")
+print(prices)
 
 # ─── POST request ───
-data = mp.call("polymarket", "wallet/identities",
-               method="POST", json={"addresses": ["0xabc..."]})
+results = mp.call("exa", "/search", method="POST", json={
+    "query": "latest AI news",
+    "numResults": 5,
+})
 
-# ─── Other HTTP methods ───
-mp.call("dex", "orders/123", method="DELETE")
-mp.call("service", "config", method="PUT", json={"key": "value"})
+# ─── Blockchain RPC ───
+block = mp.rpc_call("ethereum", "eth_blockNumber")
+print(int(block["result"], 16))  # current block number
+
+gas = mp.rpc_call("base", "eth_gasPrice")
+print(f"Gas: {int(gas['result'], 16)} wei")
+
+# Batch RPC (multiple calls in one request)
+results = mp.rpc_batch("ethereum", [
+    ("eth_blockNumber", []),
+    ("eth_gasPrice", []),
+])
+
+# ─── DeFi Data (DefiLlama) ───
+protocols = mp.defi_protocols()
+aave = mp.defi_protocol("aave")
+yields = mp.defi_yields()
 ```
 
 ---
@@ -413,14 +357,15 @@ try:
     response = chat.complete("Hello")
 except AuthenticationError:
     print("Invalid API key or wallet key")
-except RateLimitError:
-    print("Rate limited — slow down")
+except RateLimitError as e:
+    print(f"Rate limited — retry after {e.retry_after}s")
 except InsufficientBalanceError:
     print("Balance too low — top up USDC")
 except PaymentError as e:
     print(f"x402 payment signing failed: {e}")
 except APIError as e:
     print(f"API error {e.status_code}: {e.message}")
+    print(f"Response body: {e.body}")
 ```
 
 ---
@@ -432,14 +377,53 @@ from jarvisclaw import ChatClient
 
 client = ChatClient(private_key="0x...")
 
-# On-chain USDC balance
+# On-chain USDC balance (Base chain or Solana depending on key type)
 print(f"Balance: ${client.get_balance():.2f}")
 
-# Session spending (tracked locally)
+# Session spending (tracked locally in ~/.jarvisclaw/cost_log.jsonl)
 print(f"Spent: ${client.get_spending():.4f}")
 
 # Wallet address
 print(f"Wallet: {client.address}")
+```
+
+---
+
+## Async Clients (all capabilities)
+
+```python
+import asyncio
+from jarvisclaw.aio import (
+    ChatClient, ImageClient, VideoClient,
+    AudioClient, SearchClient, MarketplaceClient,
+)
+
+async def main():
+    async with ChatClient(private_key="0x...") as chat:
+        text = await chat.complete("Hello!")
+        print(text)
+
+        # Streaming
+        async for chunk in chat.stream("Tell me a story"):
+            print(chunk, end="")
+
+    async with ImageClient(private_key="0x...") as image:
+        result = await image.generate("A cat on Mars")
+        print(result.url)
+
+    async with AudioClient(api_key="sk-...") as audio:
+        result = await audio.speech("Hello world", voice="nova")
+        # result.content is bytes
+
+        # Transcribe
+        with open("recording.mp3", "rb") as f:
+            text = await audio.transcribe(f)
+
+    async with MarketplaceClient(api_key="sk-...") as mp:
+        data = await mp.call("surf", "/exchange/price?pair=ETH-USDT")
+        print(data)
+
+asyncio.run(main())
 ```
 
 ---
@@ -478,6 +462,16 @@ image = ImageClient(private_key="<base58-solana-keypair>")
 result = image.generate("Cyberpunk city")
 print(result.url)
 ```
+
+---
+
+## Configuration
+
+| Env Variable | Description |
+|---|---|
+| `JARVISCLAW_API_KEY` | API key (auto-used if no args passed) |
+| `JARVISCLAW_WALLET_KEY` | x402 private key (EVM hex or Solana bs58) |
+| `JARVISCLAW_BASE_URL` | Override API endpoint (default: `https://api.jarvisclaw.ai`) |
 
 ---
 

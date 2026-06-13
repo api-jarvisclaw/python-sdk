@@ -120,3 +120,39 @@ class AudioClient(BaseClient):
             content_type=content_type or "audio/mpeg",
         )
 
+    def transcribe(
+        self,
+        file: Any,
+        *,
+        model: str = "whisper-1",
+        language: str | None = None,
+        response_format: str | None = None,
+    ) -> str:
+        """Transcribe audio to text (speech-to-text).
+
+        Args:
+            file: Audio file (file-like object, e.g. open("audio.mp3", "rb")).
+            model: Transcription model. Defaults to "whisper-1".
+            language: Optional language hint (ISO 639-1 code, e.g. "en", "zh").
+            response_format: Response format ("json", "text", "srt", "vtt").
+                             Defaults to "json" (returns text string).
+        """
+        data_fields: dict[str, Any] = {"model": model}
+        if language:
+            data_fields["language"] = language
+        if response_format:
+            data_fields["response_format"] = response_format
+
+        resp = self._post_raw(
+            "/v1/audio/transcriptions",
+            files={"file": file},
+            data=data_fields,
+        )
+
+        # If response is plain text (srt, vtt, text formats)
+        content_type = resp.headers.get("content-type", "")
+        if "application/json" in content_type:
+            result = resp.json()
+            return result.get("text", "")
+        return resp.text
+

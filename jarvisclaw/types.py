@@ -76,9 +76,27 @@ class MusicJob:
         """Submit music generation in background thread."""
         def _do():
             resp = client._post_raw(path, json=body, timeout=300)
+            # Some providers return JSON with a URL instead of raw audio
+            content_type = resp.headers.get("content-type", "")
+            if "application/json" in content_type:
+                try:
+                    import json as _json
+                    data = _json.loads(resp.content)
+                    items = data.get("data", [])
+                    if items and isinstance(items[0], dict) and items[0].get("url"):
+                        audio_url = items[0]["url"]
+                        import requests as _requests
+                        audio_resp = _requests.get(audio_url, timeout=60)
+                        audio_resp.raise_for_status()
+                        return AudioResponse(
+                            content=audio_resp.content,
+                            content_type=audio_resp.headers.get("content-type", "audio/mpeg"),
+                        )
+                except Exception:
+                    pass
             return AudioResponse(
                 content=resp.content,
-                content_type=resp.headers.get("content-type", "audio/mpeg"),
+                content_type=content_type or "audio/mpeg",
             )
         future = _pool.submit(_do)
         return cls(_future=future)

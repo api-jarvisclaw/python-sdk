@@ -25,6 +25,7 @@ from .client import AsyncImageClient as ImageClient
 from .client import AsyncVideoClient as VideoClient
 from .client import AsyncAudioClient as AudioClient
 from .client import AsyncSearchClient as SearchClient
+from .client import AsyncMarketplaceClient as MarketplaceClient
 
 __all__ = [
     "ChatClient",
@@ -32,4 +33,5 @@ __all__ = [
     "VideoClient",
     "AudioClient",
     "SearchClient",
+    "MarketplaceClient",
 ]

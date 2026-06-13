@@ -167,9 +167,9 @@ class TestMarketplaceRoutes:
         from jarvisclaw import MarketplaceClient
         mp = make_client(MarketplaceClient, "api_key")
         start = time.time()
-        result = mp.search("BTC price")
+        result = mp.call("surf", "/exchange/price?pair=BTC-USDT")
         elapsed = time.time() - start
-        log_result("Marketplace search",
+        log_result("Marketplace surf price",
                    response=str(result)[:200],
                    latency_ms=f"{elapsed*1000:.0f}")
         assert result is not None
