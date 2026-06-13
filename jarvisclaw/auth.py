@@ -86,6 +86,7 @@ class X402Auth(AuthStrategy):
         signature = self._signer.sign_from_402(resp, url)
         headers = kwargs.pop("headers", {}) or {}
         headers["PAYMENT-SIGNATURE"] = signature
+        _rewind_files(kwargs)
         retry = session.request(method, url, headers=headers, **kwargs)
         return retry
 
@@ -112,6 +113,7 @@ class SolanaX402Auth(AuthStrategy):
         signature = self._signer.sign_from_402(resp, url, self._base_url)
         headers = kwargs.pop("headers", {}) or {}
         headers["PAYMENT-SIGNATURE"] = signature
+        _rewind_files(kwargs)
         retry = session.request(method, url, headers=headers, **kwargs)
         return retry
 
@@ -121,3 +123,35 @@ class SolanaX402Auth(AuthStrategy):
 
     def supports_x402(self) -> bool:
         return True
+
+
+def _rewind_files(kwargs: dict) -> None:
+    """Seek file objects in 'files' back to start for retry after 402.
+
+    After the initial request is sent, file objects are at EOF.
+    Without rewinding, the retry would upload empty content.
+    Handles all formats accepted by requests/httpx:
+      - dict: {"file": file_obj} or {"file": ("name", file_obj, "mime")}
+      - list: [("file", file_obj)] or [("file", ("name", file_obj, "mime"))]
+    """
+    files = kwargs.get("files")
+    if not files:
+        return
+
+    def _seek(obj):
+        if hasattr(obj, "seek"):
+            obj.seek(0)
+        elif isinstance(obj, (tuple, list)) and len(obj) >= 2:
+            # ("filename", file_obj, ...) tuple format
+            if hasattr(obj[1], "seek"):
+                obj[1].seek(0)
+
+    if isinstance(files, dict):
+        for val in files.values():
+            _seek(val)
+    elif isinstance(files, (list, tuple)):
+        for item in files:
+            if isinstance(item, (tuple, list)) and len(item) >= 2:
+                _seek(item[1])
+            elif hasattr(item, "seek"):
+                item.seek(0)

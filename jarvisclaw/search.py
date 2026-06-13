@@ -1,7 +1,6 @@
 """SearchClient — web search via chat completions format."""
 from __future__ import annotations
 
-import warnings
 from typing import Any
 
 from ._base import BaseClient

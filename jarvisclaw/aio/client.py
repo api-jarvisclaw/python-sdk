@@ -104,6 +104,9 @@ class AsyncBaseClient:
         for attempt in range(MAX_RETRIES + 1):
             if attempt > 0:
                 await asyncio.sleep(min(2 ** attempt + random.random(), 30))
+                # Rewind file objects for retry (they're at EOF after first send)
+                from ..auth import _rewind_files
+                _rewind_files(kwargs)
 
             resp = await self._client.request(method, url, timeout=req_timeout, **kwargs)
 
@@ -148,7 +151,7 @@ class AsyncBaseClient:
             def json(self): return _json_data
 
         # Dispatch to the correct signer — Solana needs base_url as third arg
-        from ..auth import SolanaX402Auth
+        from ..auth import SolanaX402Auth, _rewind_files
         if isinstance(self._auth, SolanaX402Auth):
             signature = self._auth._signer.sign_from_402(_Resp(), url, self.base_url)
         else:
@@ -157,6 +160,7 @@ class AsyncBaseClient:
             return None
         headers = kwargs.pop("headers", {}) or {}
         headers["PAYMENT-SIGNATURE"] = signature
+        _rewind_files(kwargs)
         return await self._client.request(method, url, headers=headers, timeout=req_timeout, **kwargs)
 
     @staticmethod
@@ -179,6 +183,17 @@ class AsyncChatClient(AsyncBaseClient):
     async def completion(self, messages: list[dict], *, model: str | None = None, **kwargs) -> ChatResponse:
         model = model or "auto"
         data = await self._post("/v1/chat/completions", json={"model": model, "messages": messages, **kwargs})
+
+        # Handle search response format (auto/search returns {summary} not {choices})
+        if "summary" in data and "choices" not in data:
+            return ChatResponse(
+                content=data["summary"],
+                model=data.get("model", model),
+                id=data.get("id", ""),
+                usage=data.get("usage", {}),
+                raw=data,
+            )
+
         content = data.get("choices", [{}])[0].get("message", {}).get("content", "") if data.get("choices") else ""
         return ChatResponse(content=content, model=data.get("model", model), id=data.get("id", ""), usage=data.get("usage", {}), raw=data)
 
@@ -189,6 +204,27 @@ class AsyncChatClient(AsyncBaseClient):
         headers = self._auth.prepare_headers({})
         url = self.base_url + "/v1/chat/completions"
         async with self._client.stream("POST", url, json=body, headers=headers, timeout=self.timeout) as resp:
+            # Check for errors before parsing SSE
+            if resp.status_code == 401:
+                await resp.aread()
+                raise AuthenticationError(401, "Unauthorized", {})
+            if resp.status_code == 402:
+                await resp.aread()
+                # Try x402 payment and fall back to non-streaming
+                if self._auth.supports_x402():
+                    raise InsufficientBalanceError(
+                        402, "x402 streaming not supported — use complete() for paid requests", {}
+                    )
+                raise InsufficientBalanceError(402, "Insufficient balance", {})
+            if resp.status_code == 429:
+                await resp.aread()
+                raise RateLimitError(429, "Rate limit exceeded", {})
+            if resp.status_code >= 400:
+                await resp.aread()
+                body_data = self._safe_json(resp)
+                msg = body_data.get("error", {}).get("message", f"Error {resp.status_code}")
+                raise APIError(resp.status_code, msg, body_data)
+
             async for line in resp.aiter_lines():
                 line = line.strip()
                 if not line:
@@ -347,17 +383,16 @@ class AsyncAudioClient(AsyncBaseClient):
         data_fields: dict = {"model": model}
         if language:
             data_fields["language"] = language
-        files = {"file": file}
-        # httpx uses 'data' for form fields alongside 'files'
-        url = self.base_url + "/v1/audio/transcriptions"
-        headers = self._auth.prepare_headers({})
-        resp = await self._client.post(url, data=data_fields, files=files, headers=headers, timeout=self.timeout)
-        if resp.status_code >= 400:
-            body = self._safe_json(resp)
-            from ..errors import APIError
-            raise APIError(resp.status_code, body.get("error", {}).get("message", "Transcription failed"), body)
-        result = resp.json()
-        return result.get("text", "")
+        resp = await self._post_raw(
+            "/v1/audio/transcriptions",
+            data=data_fields,
+            files={"file": file},
+        )
+        content_type = resp.headers.get("content-type", "")
+        if "application/json" in content_type:
+            result = resp.json()
+            return result.get("text", "")
+        return resp.text
 
 
 
@@ -412,14 +447,17 @@ class AsyncMarketplaceClient(AsyncBaseClient):
         Args:
             service: Service name (e.g., "polymarket", "dex", "phone").
             path: API path within the service.
-            method: HTTP method (GET, POST, etc.).
+            method: HTTP method (GET, POST, PUT, DELETE, PATCH).
             **kwargs: Additional request params (json, data, params, etc.).
         """
         full_path = f"/v1/marketplace/{service.strip('/')}/{path.lstrip('/')}"
         m = method.upper()
         if m == "GET":
             return await self._get(full_path, **kwargs)
-        return await self._post(full_path, **kwargs)
+        if m == "POST":
+            return await self._post(full_path, **kwargs)
+        # PUT, DELETE, PATCH, etc.
+        return await self._request(m, full_path, **kwargs)
 
     async def rpc_call(self, chain: str, method: str, params: Any = None) -> Any:
         """Send a JSON-RPC 2.0 request to a blockchain."""

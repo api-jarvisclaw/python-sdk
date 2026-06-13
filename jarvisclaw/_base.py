@@ -104,13 +104,13 @@ class BaseClient:
         """Get current balance in USD.
 
         - x402 mode: queries on-chain USDC balance via public RPC
-        - API Key mode: queries account quota from API
+        - API Key mode: queries remaining quota via billing API
         """
         if self._auth.address:
             return self._query_onchain_balance()
-        data = self._get("/api/user/self")
-        quota = data.get("data", {}).get("quota", 0)
-        return quota / QUOTA_PER_USD
+        data = self._get("/v1/dashboard/billing/subscription")
+        # OpenAI-compatible billing response: hard_limit_usd = remaining + used
+        return data.get("hard_limit_usd", 0.0)
 
     def get_spending(self) -> float:
         """Total estimated USD spent in this session (approximate, uses flat rate)."""
@@ -150,6 +150,9 @@ class BaseClient:
             if attempt > 0:
                 delay = min(2 ** attempt + random.random(), 30)
                 time.sleep(delay)
+                # Rewind file objects for retry (they're at EOF after first send)
+                from .auth import _rewind_files
+                _rewind_files(kwargs)
 
             resp = self._do_request(method, url, stream, **kwargs)
 
