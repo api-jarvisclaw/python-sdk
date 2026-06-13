@@ -317,11 +317,13 @@ class AsyncVideoClient(AsyncBaseClient):
 
     async def _poll(self, job_id: str, interval: float, timeout: float) -> VideoJob:
         start = time.monotonic()
+        last_raw: dict = {}
         while True:
             if time.monotonic() - start >= timeout:
-                return VideoJob(id=job_id, status="timeout", raw={"error": "Poll timeout"})
+                return VideoJob(id=job_id, status="timeout", raw=last_raw or {"error": "Poll timeout"})
             await asyncio.sleep(interval)
             job = await self.status(job_id)
+            last_raw = job.raw
             if job.status == "completed":
                 return job
             if job.status == "failed":

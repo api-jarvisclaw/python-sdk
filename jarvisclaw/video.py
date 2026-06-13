@@ -103,19 +103,22 @@ class VideoClient(BaseClient):
     ) -> VideoJob:
         """Poll a video job until completion."""
         start = time.monotonic()
+        last_raw: dict = {}
 
         while True:
             elapsed = time.monotonic() - start
             if elapsed >= timeout:
+                # Preserve last poll response so user can see progress/elapsed_seconds
                 return VideoJob(
                     id=job_id,
                     status="timeout",
-                    raw={"error": "Poll timeout exceeded"},
+                    raw=last_raw or {"error": "Poll timeout exceeded"},
                 )
 
             time.sleep(interval)
 
             job = self.status(job_id)
+            last_raw = job.raw
             if job.status == "completed":
                 return job
             if job.status == "failed":
