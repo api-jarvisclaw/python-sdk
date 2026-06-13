@@ -26,7 +26,7 @@ class VideoClient(BaseClient):
         model: str | None = None,
         duration: int = 5,
         poll_interval: float = 5.0,
-        poll_timeout: float = 600.0,
+        poll_timeout: float = 900.0,
         wait: bool = True,
         **kwargs: Any,
     ) -> VideoJob:
@@ -40,7 +40,9 @@ class VideoClient(BaseClient):
             model: Model identifier. Defaults to "auto/video".
             duration: Video duration in seconds.
             poll_interval: Seconds between poll requests (default 5).
-            poll_timeout: Max seconds to wait for completion (default 600).
+            poll_timeout: Max seconds to wait for completion (default 900).
+                Upstream status can lag 7+ minutes; 15min recommended.
+                Jobs are retrievable for 48 hours regardless of timeout.
             wait: If True (default), block until video is ready.
             **kwargs: Additional params (e.g., asset_id, real_face_asset_id).
         """
@@ -81,14 +83,15 @@ class VideoClient(BaseClient):
         job_id: str,
         *,
         poll_interval: float = 5.0,
-        poll_timeout: float = 600.0,
+        poll_timeout: float = 900.0,
     ) -> VideoJob:
         """Block until a video job completes. Use after generate(wait=False).
 
         Args:
             job_id: The job ID returned from generate(wait=False).
             poll_interval: Seconds between polls (default 5).
-            poll_timeout: Max seconds to wait (default 600).
+            poll_timeout: Max seconds to wait (default 900).
+                Jobs are retrievable for 48 hours — call status() later if timeout.
 
         Usage:
             job = video.generate("Ocean waves", wait=False)
