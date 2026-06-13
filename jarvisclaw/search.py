@@ -39,27 +39,44 @@ class SearchClient(BaseClient):
                 "max_results": num_results,
             },
         )
-        # Response is chat completion format — extract content
-        content = ""
-        choices = data.get("choices", [])
-        if choices:
-            content = choices[0].get("message", {}).get("content", "")
 
-        # Try to parse structured results from the response
+        # Try structured results first (some providers return these)
         results = data.get("results", data.get("data", []))
-        if results:
+        if isinstance(results, list) and results:
             return [
                 SearchResult(
                     title=r.get("title", ""),
                     url=r.get("url", ""),
-                    snippet=r.get("snippet", ""),
+                    snippet=r.get("snippet", r.get("text", "")),
                 )
                 for r in results
+                if isinstance(r, dict)
             ]
 
-        # If no structured results, return the content as a single result
-        if content:
-            return [SearchResult(title="Search Result", url="", snippet=content)]
+        # Search-summary format: {"summary": "...", "citations": [...]}
+        summary = data.get("summary", "")
+        if summary:
+            citations = data.get("citations", [])
+            if isinstance(citations, list) and citations:
+                return [
+                    SearchResult(
+                        title=c.get("title", ""),
+                        url=c.get("url", ""),
+                        snippet=c.get("snippet", c.get("text", "")),
+                    )
+                    for c in citations
+                    if isinstance(c, dict)
+                ]
+            # No structured citations — return summary as a single result
+            return [SearchResult(title="Search Result", url="", snippet=summary)]
+
+        # Chat completion format: {"choices": [{"message": {"content": "..."}}]}
+        choices = data.get("choices", [])
+        if choices:
+            content = choices[0].get("message", {}).get("content", "")
+            if content:
+                return [SearchResult(title="Search Result", url="", snippet=content)]
+
         return []
 
     def find_similar(

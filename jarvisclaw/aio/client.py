@@ -407,16 +407,23 @@ class AsyncSearchClient(AsyncBaseClient):
             "messages": [{"role": "user", "content": query}],
             "max_results": num_results,
         })
-        # Response is chat completion format — extract structured results or content
+        # Structured results
         results = data.get("results", data.get("data", []))
-        if results:
-            return [SearchResult(title=r.get("title", ""), url=r.get("url", ""), snippet=r.get("snippet", "")) for r in results]
-        content = ""
+        if isinstance(results, list) and results:
+            return [SearchResult(title=r.get("title", ""), url=r.get("url", ""), snippet=r.get("snippet", r.get("text", ""))) for r in results if isinstance(r, dict)]
+        # Search-summary format
+        summary = data.get("summary", "")
+        if summary:
+            citations = data.get("citations", [])
+            if isinstance(citations, list) and citations:
+                return [SearchResult(title=c.get("title", ""), url=c.get("url", ""), snippet=c.get("snippet", c.get("text", ""))) for c in citations if isinstance(c, dict)]
+            return [SearchResult(title="Search Result", url="", snippet=summary)]
+        # Chat completion format
         choices = data.get("choices", [])
         if choices:
             content = choices[0].get("message", {}).get("content", "")
-        if content:
-            return [SearchResult(title="Search Result", url="", snippet=content)]
+            if content:
+                return [SearchResult(title="Search Result", url="", snippet=content)]
         return []
 
     async def find_similar(self, url: str, *, num_results: int = 10) -> list[SearchResult]:
