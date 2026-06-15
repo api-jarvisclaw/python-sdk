@@ -297,39 +297,98 @@ for page in pages:
 
 ## MarketplaceClient
 
-| Method | Returns | Blocking |
-|--------|---------|----------|
-| `call(service, path)` | `dict` | Yes |
-| `call(service, path, method="POST")` | `dict` | Yes |
-| `rpc_call(chain, method, params)` | `dict` | Yes |
-| `rpc_batch(chain, calls)` | `list` | Yes |
-| `defi_protocols()` | `dict` | Yes |
-| `defi_protocol(slug)` | `dict` | Yes |
-| `defi_yields()` | `dict` | Yes |
+Access 83+ crypto data endpoints, blockchain RPC, DeFi, prediction markets, web search, and more via x402 micropayments.
+
+> **Note:** Marketplace only supports x402 private key authentication. API keys are not supported for marketplace services.
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `call(service, path)` | `dict` | GET request to marketplace endpoint |
+| `call(service, path, method="POST", json={})` | `dict` | POST request |
+| `rpc_call(chain, method, params)` | `dict` | JSON-RPC to any blockchain |
+| `rpc_batch(chain, calls)` | `list` | Batch RPC (multiple calls in one request) |
+| `defi_protocols()` | `list` | DeFi protocol rankings |
+| `defi_protocol(slug)` | `dict` | Single protocol detail |
+| `defi_yields()` | `dict` | DeFi yield data |
 
 ```python
 from jarvisclaw import MarketplaceClient
 
-mp = MarketplaceClient(private_key="0x...")
+mp = MarketplaceClient(private_key="0x<your-evm-private-key>")
 
-# ─── Generic service call ───
-prices = mp.call("surf", "/exchange/price?pair=BTC-USDT")
-print(prices)
+# ─── Crypto Data (Surf — 83 endpoints) ───
 
-# ─── POST request ───
-results = mp.call("exa", "/search", method="POST", json={
-    "query": "latest AI news",
-    "numResults": 5,
+# Exchange data (16 CEXes: binance, coinbase, kraken, etc.)
+price = mp.call("surf", "/exchange/price", params={"pair": "BTC-USDT"})
+print(f"BTC: ${price['price']:,.2f}")
+
+klines = mp.call("surf", "/exchange/klines", params={"pair": "ETH-USDT", "interval": "1h", "limit": "24"})
+funding = mp.call("surf", "/exchange/funding-history", params={"pair": "BTC-USDT-PERP"})
+
+# Market overview
+rankings = mp.call("surf", "/market/ranking", params={"limit": "10"})
+fear_greed = mp.call("surf", "/market/fear-greed")
+etf = mp.call("surf", "/market/etf")
+indicators = mp.call("surf", "/market/price-indicator", params={"symbol": "BTC", "indicator": "rsi"})
+
+# Social / CT intelligence
+social_ranking = mp.call("surf", "/social/ranking", params={"limit": "10"})
+tweets = mp.call("surf", "/social/user/posts", params={"username": "VitalikButerin", "limit": "5"})
+mindshare = mp.call("surf", "/social/mindshare", params={"symbol": "ETH"})
+
+# Wallet intelligence (100M+ labeled wallets, 13 networks)
+wallet = mp.call("surf", "/wallet/detail", params={"address": "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045"})
+net_worth = mp.call("surf", "/wallet/net-worth", params={"address": "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045"})
+labels = mp.call("surf", "/wallet/labels/batch", method="POST", json={"addresses": ["0xd8dA...", "0xABC..."]})
+
+# Token analytics
+holders = mp.call("surf", "/token/holders", params={"symbol": "UNI", "limit": "10"})
+tokenomics = mp.call("surf", "/token/tokenomics", params={"symbol": "ARB"})
+dex_trades = mp.call("surf", "/token/dex-trades", params={"symbol": "PEPE", "limit": "20"})
+
+# News (AI-curated)
+news = mp.call("surf", "/news/feed", params={"limit": "5"})
+article = mp.call("surf", "/news/detail", params={"id": "article-id"})
+
+# On-chain SQL (80+ ClickHouse tables across 7 networks)
+result = mp.call("surf", "/onchain/sql", method="POST", json={
+    "sql": "SELECT from_address, SUM(value/1e18) as eth FROM ethereum.transactions WHERE block_time > now() - interval '1 hour' GROUP BY from_address ORDER BY eth DESC LIMIT 5"
+})
+for row in result["rows"]:
+    print(f"  {row[0]}: {row[1]:.4f} ETH")
+
+# VC Fund intelligence
+funds = mp.call("surf", "/fund/ranking", params={"limit": "10"})
+fund_detail = mp.call("surf", "/fund/detail", params={"slug": "a16z"})
+
+# Unified search (web, projects, wallets, social)
+results = mp.call("surf", "/search/web", params={"q": "bitcoin etf approval"})
+projects = mp.call("surf", "/search/project", params={"q": "layer 2"})
+
+# ─── Prediction Markets ───
+markets = mp.call("prediction", "/polymarket/markets", params={"limit": "5", "category": "politics"})
+kalshi = mp.call("prediction", "/kalshi/markets", params={"limit": "5"})
+search = mp.call("prediction", "/markets/search", params={"q": "bitcoin 2026", "limit": "5"})
+
+# ─── DEX Trading (0x) ───
+quote = mp.call("dex", "/price", params={
+    "sellToken": "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE",
+    "buyToken": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+    "sellAmount": "100000000000000000",
+    "chainId": "8453",
 })
 
-# ─── Blockchain RPC ───
-block = mp.rpc_call("ethereum", "eth_blockNumber")
-print(int(block["result"], 16))  # current block number
+# ─── Web Search (Exa) ───
+exa = mp.call("exa", "/search", method="POST", json={"query": "AI agents 2026", "num_results": 5})
 
-gas = mp.rpc_call("base", "eth_gasPrice")
-print(f"Gas: {int(gas['result'], 16)} wei")
+# ─── Blockchain RPC (40+ chains) ───
+block = mp.rpc_call("eth", "eth_blockNumber")
+print(f"Ethereum block: {int(block['result'], 16)}")
 
-# Batch RPC (multiple calls in one request)
+slot = mp.rpc_call("sol", "getSlot")
+print(f"Solana slot: {slot['result']}")
+
+# Batch RPC
 results = mp.rpc_batch("ethereum", [
     ("eth_blockNumber", []),
     ("eth_gasPrice", []),
@@ -337,9 +396,20 @@ results = mp.rpc_batch("ethereum", [
 
 # ─── DeFi Data (DefiLlama) ───
 protocols = mp.defi_protocols()
-aave = mp.defi_protocol("aave")
+aave = mp.defi_protocol("aave-v3")
 yields = mp.defi_yields()
 ```
+
+### Pricing
+
+| Tier | Cost | Endpoints |
+|------|------|-----------|
+| Standard | $0.0075/call | exchange, market, social, wallet, token, news, fund, search, prediction |
+| Premium SQL | $0.02/call | onchain/sql, onchain/query, onchain/schema |
+| DEX | $0.001/call | dex/price, dex/quote |
+| Web Search | $0.01/call | exa/search |
+| RPC | $0.002/call | rpc/eth, rpc/sol, rpc/base, etc. |
+| DeFi | $0.005/call | defi/protocols, defi/yields |
 
 ---
 
