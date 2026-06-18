@@ -1,4 +1,5 @@
 """JarvisClaw AI SDK — per-capability Client classes for Chat, Video, Image, Audio, Search."""
+from .agent import Agent
 from .audio import AudioClient
 from .chat import ChatClient
 from .errors import (
@@ -16,6 +17,7 @@ from .types import MusicJob
 from .video import VideoClient
 
 __all__ = [
+    "Agent",
     "ChatClient",
     "VideoClient",
     "ImageClient",
@@ -30,4 +32,4 @@ __all__ = [
     "InsufficientBalanceError",
     "PaymentError",
 ]
-__version__ = "1.3.3"
+__version__ = "1.4.1"
