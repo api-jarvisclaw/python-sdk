@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "jarvisclaw"
-version = "1.4.1"
+version = "1.5.0"
 description = "JarvisClaw AI SDK - Chat, Images, Video, Search, Prediction Market. Supports API Key and x402 Agent payments."
 readme = "README.md"
 license = {text = "MIT"}

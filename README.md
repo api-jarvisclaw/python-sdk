@@ -32,6 +32,63 @@ client = ChatClient()
 
 ---
 
+## Agent (AIP + Treasury) ⚡ NEW
+
+The `Agent` class is the recommended entry point for autonomous agents. One object for intent resolution, wallet management, and model execution.
+
+```python
+from jarvisclaw import Agent
+
+agent = Agent(api_key="sk-YOUR-KEY")
+# or: agent = Agent(private_key="0x...")  for x402
+
+# One line: find cheapest model within budget, call it, return text
+result = agent.ask("Explain quantum computing", budget=0.01, optimize="cost")
+print(result)
+```
+
+### Intent Resolution (Free)
+
+```python
+# Find best provider without executing
+matches = agent.resolve("chat_completion", max_price=0.01, optimize="cost")
+print(matches["matches"][0]["model"])  # → "deepseek-chat"
+
+# Other intents
+agent.resolve("image_generation", optimize="quality")
+agent.resolve("web_search", optimize="latency")
+```
+
+### Wallet & Treasury
+
+```python
+# Balance
+bal = agent.balance()
+print(f"${bal['total_usd']}")
+
+# Pools (Operations / Insurance / Savings / Dividends)
+pools = agent.pools()
+
+# Limits
+agent.set_limits(daily_max_usd=30.0, per_request_max_usd=0.5)
+
+# History
+history = agent.history(page=1, page_size=50)
+```
+
+### Supported Intent Types
+
+| Intent | What It Finds |
+|--------|--------------|
+| `chat_completion` | GPT-4o, Claude, DeepSeek, etc. |
+| `image_generation` | DALL-E, Flux, Midjourney |
+| `video_generation` | Sora, Seedance, Kling |
+| `text_to_speech` | TTS-1, ElevenLabs |
+| `web_search` | Surf (83 endpoints) |
+| `knowledge_search` | Exa |
+
+---
+
 ## ChatClient
 
 | Method | Returns | Blocking |
