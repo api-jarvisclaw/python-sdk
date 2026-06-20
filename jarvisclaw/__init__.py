@@ -11,10 +11,12 @@ from .errors import (
     RateLimitError,
 )
 from .image import ImageClient
+from .intent import IntentClient
 from .marketplace import MarketplaceClient
 from .search import SearchClient
 from .types import MusicJob
 from .video import VideoClient
+from .wallet import WalletClient
 
 __all__ = [
     "Agent",
@@ -24,6 +26,8 @@ __all__ = [
     "AudioClient",
     "SearchClient",
     "MarketplaceClient",
+    "WalletClient",
+    "IntentClient",
     "MusicJob",
     "JarvisClawError",
     "APIError",
@@ -32,4 +36,4 @@ __all__ = [
     "InsufficientBalanceError",
     "PaymentError",
 ]
-__version__ = "1.5.0"
+__version__ = "1.5.1"

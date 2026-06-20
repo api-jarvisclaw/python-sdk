@@ -90,6 +90,9 @@ class AsyncBaseClient:
     async def _post_raw(self, path: str, **kwargs) -> httpx.Response:
         return await self._request_raw("POST", path, **kwargs)
 
+    async def _put(self, path: str, **kwargs) -> Any:
+        return await self._request("PUT", path, **kwargs)
+
     async def _request(self, method: str, path: str, **kwargs) -> Any:
         resp = await self._request_raw(method, path, **kwargs)
         return resp.json()
@@ -485,3 +488,148 @@ def _extract_video_url_async(data: dict) -> str:
         if url:
             return url
     return ""
+
+
+# ─── Wallet ───────────────────────────────────────────────────
+
+class AsyncWalletClient(AsyncBaseClient):
+    """Async wallet management client."""
+
+    async def balance(self) -> dict[str, Any]:
+        """Get wallet balance.
+
+        Returns dict with: quota, quota_usd, hd_wallet, subscription, total_usd
+        """
+        return await self._get("/v1/wallet/balance")
+
+    async def history(self, *, page: int = 1, page_size: int = 20) -> dict[str, Any]:
+        """Get transaction history.
+
+        Returns dict with: transactions, total, page
+        """
+        return await self._get(f"/v1/wallet/history?page={page}&page_size={page_size}")
+
+    async def limits(self) -> dict[str, Any]:
+        """Get spending limits.
+
+        Returns dict with: user_id, daily_max_usd, per_request_max_usd,
+        monthly_max_usd, auto_pause_below_usd, pool_allocation, updated_at
+        """
+        return await self._get("/v1/wallet/limits")
+
+    async def update_limits(self, data: dict[str, Any]) -> dict[str, Any]:
+        """Update spending limits.
+
+        Args:
+            data: dict with keys: daily_max_usd, per_request_max_usd,
+                  monthly_max_usd, auto_pause_below_usd, pool_allocation (optional)
+
+        Returns dict with: success
+        """
+        return await self._put("/v1/wallet/limits", json=data)
+
+    async def pools(self) -> dict[str, Any]:
+        """Get pool allocation and balances.
+
+        Returns dict with: allocation, pool_balances
+        """
+        return await self._get("/v1/wallet/pools")
+
+
+# ─── Intent ───────────────────────────────────────────────────
+
+class AsyncIntentClient(AsyncBaseClient):
+    """Async AIP Intent Protocol client. Resolve, execute, and budget-manage AI intents."""
+
+    async def resolve(
+        self,
+        intent: str,
+        *,
+        constraints: dict[str, Any] | None = None,
+        preferences: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Resolve an intent to ranked provider matches.
+
+        Args:
+            intent: Intent type (e.g. "chat_completion", "image_generation")
+            constraints: Optional dict with max_price_usd, max_latency_ms, features
+            preferences: Optional dict with optimize_for, limit
+
+        Returns dict with: matches, intent_type, total_available
+        """
+        body: dict[str, Any] = {"intent": intent}
+        if constraints:
+            body["constraints"] = constraints
+        if preferences:
+            body["preferences"] = preferences
+        return await self._post("/v1/intent/resolve", json=body)
+
+    async def execute(
+        self,
+        intent: str,
+        payload: dict[str, Any],
+        *,
+        constraints: dict[str, Any] | None = None,
+        preferences: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Resolve and execute an intent, returning the raw provider response.
+
+        Args:
+            intent: Intent type
+            payload: Opaque request body forwarded to the resolved provider
+            constraints: Optional filtering constraints
+            preferences: Optional optimization preferences
+
+        Returns: Raw upstream provider response as dict
+        """
+        body: dict[str, Any] = {"intent": intent, "payload": payload}
+        if constraints:
+            body["constraints"] = constraints
+        if preferences:
+            body["preferences"] = preferences
+        return await self._post("/v1/intent/execute", json=body)
+
+    async def execute_budget(
+        self,
+        intent: str,
+        payload: dict[str, Any],
+        budget: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Execute an intent with budget control and settlement tracking.
+
+        Args:
+            intent: Intent type
+            payload: Opaque request body forwarded to provider
+            budget: Dict with max_total_usd (required), preferred_payment_method, allow_overdraft
+
+        Returns dict with: request_id, status, provider, model, result,
+            actual_cost_usd, settlement, risk_level, duration_ms, reason
+        """
+        body: dict[str, Any] = {
+            "intent": intent,
+            "payload": payload,
+            "budget": budget,
+        }
+        return await self._post("/v1/intent/execute-budget", json=body)
+
+    async def audit(self) -> dict[str, Any]:
+        """Get the audit trail for recent requests.
+
+        Returns dict with: entries, count
+        """
+        return await self._get("/v1/intent/audit")
+
+    async def types(self) -> list[str]:
+        """List supported intent types.
+
+        Returns list of intent type strings.
+        """
+        data = await self._get("/v1/intent/types")
+        return data["intent_types"]
+
+    async def providers(self) -> dict[str, Any]:
+        """List all registered providers.
+
+        Returns dict with: providers, total
+        """
+        return await self._get("/v1/providers")
