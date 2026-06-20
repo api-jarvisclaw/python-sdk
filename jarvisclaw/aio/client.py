@@ -432,7 +432,7 @@ class AsyncSearchClient(AsyncBaseClient):
         return []
 
     async def find_similar(self, url: str, *, num_results: int = 10) -> list[SearchResult]:
-        data = await self._post("/v1/marketplace/exa/findSimilar", json={
+        data = await self._post("/v1/marketplace/exa/find-similar", json={
             "url": url,
             "numResults": num_results,
         })
