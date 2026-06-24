@@ -91,7 +91,7 @@ class SearchClient(BaseClient):
             num_results: Maximum number of results to return.
         """
         data = self._post(
-            "/v1/marketplace/exa/findSimilar",
+            "/v1/marketplace/exa/find-similar",
             json={
                 "url": url,
                 "numResults": num_results,

@@ -26,6 +26,8 @@ from .client import AsyncVideoClient as VideoClient
 from .client import AsyncAudioClient as AudioClient
 from .client import AsyncSearchClient as SearchClient
 from .client import AsyncMarketplaceClient as MarketplaceClient
+from .client import AsyncWalletClient as WalletClient
+from .client import AsyncIntentClient as IntentClient
 
 __all__ = [
     "ChatClient",
@@ -34,4 +36,6 @@ __all__ = [
     "AudioClient",
     "SearchClient",
     "MarketplaceClient",
+    "WalletClient",
+    "IntentClient",
 ]
