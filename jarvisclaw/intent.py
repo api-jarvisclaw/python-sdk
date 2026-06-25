@@ -108,3 +108,129 @@ class IntentClient(BaseClient):
         Returns dict with: providers, total
         """
         return self._get("/v1/providers")
+
+    # ─── Analytics ────────────────────────────────────────────
+
+    def cost_summary(
+        self,
+        *,
+        start: int | None = None,
+        end: int | None = None,
+        top_n: int = 10,
+        scope: str = "self",
+    ) -> dict[str, Any]:
+        """Get cost summary for a time range.
+
+        Args:
+            start: Start time as unix timestamp (default: 24h ago)
+            end: End time as unix timestamp (default: now)
+            top_n: Number of top models/providers to include
+            scope: "self" for current user, "global" for admin-level view
+
+        Returns dict with: success, data (total_cost, request_count, top_models, etc.)
+        """
+        params: dict[str, Any] = {"top_n": top_n, "scope": scope}
+        if start is not None:
+            params["start"] = start
+        if end is not None:
+            params["end"] = end
+        return self._get("/v1/aip/analytics/summary", params=params)
+
+    def cost_trend(
+        self,
+        *,
+        start: int | None = None,
+        end: int | None = None,
+        granularity: str = "hour",
+        scope: str = "self",
+    ) -> dict[str, Any]:
+        """Get cost trend over time.
+
+        Args:
+            start: Start time as unix timestamp (default: 24h ago)
+            end: End time as unix timestamp (default: now)
+            granularity: "hour" or "day"
+            scope: "self" for current user, "global" for admin-level view
+
+        Returns dict with: success, data (list of time-bucketed cost entries)
+        """
+        params: dict[str, Any] = {"granularity": granularity, "scope": scope}
+        if start is not None:
+            params["start"] = start
+        if end is not None:
+            params["end"] = end
+        return self._get("/v1/aip/analytics/trend", params=params)
+
+    def budget_status(
+        self,
+        *,
+        daily_budget: float = 10.0,
+        monthly_budget: float = 200.0,
+        scope: str = "self",
+    ) -> dict[str, Any]:
+        """Get current budget utilization status.
+
+        Args:
+            daily_budget: Daily budget limit in USD
+            monthly_budget: Monthly budget limit in USD
+            scope: "self" for current user, "global" for admin-level view
+
+        Returns dict with: success, data (daily_spent, monthly_spent, remaining, alerts)
+        """
+        params: dict[str, Any] = {
+            "daily_budget": daily_budget,
+            "monthly_budget": monthly_budget,
+            "scope": scope,
+        }
+        return self._get("/v1/aip/analytics/budget", params=params)
+
+    def model_breakdown(
+        self,
+        *,
+        start: int | None = None,
+        end: int | None = None,
+        top_n: int = 10,
+        scope: str = "self",
+    ) -> dict[str, Any]:
+        """Get per-model usage breakdown.
+
+        Args:
+            start: Start time as unix timestamp (default: 24h ago)
+            end: End time as unix timestamp (default: now)
+            top_n: Number of top models to return
+            scope: "self" for current user, "global" for admin-level view
+
+        Returns dict with: success, data (list of model entries with tokens, cost, requests)
+        """
+        params: dict[str, Any] = {"top_n": top_n, "scope": scope}
+        if start is not None:
+            params["start"] = start
+        if end is not None:
+            params["end"] = end
+        return self._get("/v1/aip/analytics/models", params=params)
+
+    def roi(
+        self,
+        *,
+        start: int | None = None,
+        end: int | None = None,
+        top_n: int = 10,
+        scope: str = "self",
+    ) -> dict[str, Any]:
+        """Get ROI (tokens-per-dollar) efficiency metrics per model.
+
+        Args:
+            start: Start time as unix timestamp (default: 24h ago)
+            end: End time as unix timestamp (default: now)
+            top_n: Number of top models to return
+            scope: "self" for current user, "global" for admin-level view
+
+        Returns dict with: success, data (list of model ROI entries with
+            model_name, total_tokens, cost_usd, tokens_per_dollar)
+        """
+        params: dict[str, Any] = {"top_n": top_n, "scope": scope}
+        if start is not None:
+            params["start"] = start
+        if end is not None:
+            params["end"] = end
+        return self._get("/v1/aip/analytics/roi", params=params)
