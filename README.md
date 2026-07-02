@@ -76,6 +76,67 @@ print(resp.choices[0].message.content)
 
 You get AIP intent routing, automatic provider failover, and optional x402 crypto payments — all invisible to your existing code.
 
+## Using Official SDKs Natively
+
+You can also use the official `openai` or `anthropic` Python SDKs directly against JarvisClaw — just set the `base_url`:
+
+### OpenAI SDK (Responses API)
+
+```python
+from openai import OpenAI
+
+client = OpenAI(
+    api_key="sk-your-jarvisclaw-key",  # or set OPENAI_API_KEY env
+    base_url="https://api.jarvisclaw.ai/v1"
+)
+
+# Responses API (next-gen)
+response = client.responses.create(
+    model="anthropic/claude-sonnet-4-20250514",
+    input="Explain quantum computing in one paragraph"
+)
+print(response.output_text)
+
+# Chat Completions (classic)
+resp = client.chat.completions.create(
+    model="openai/gpt-4.1",
+    messages=[{"role": "user", "content": "Hello!"}]
+)
+print(resp.choices[0].message.content)
+```
+
+### Anthropic SDK (Native Messages API)
+
+```python
+import anthropic
+
+client = anthropic.Anthropic(
+    api_key="sk-your-jarvisclaw-key",  # or set ANTHROPIC_API_KEY env
+    base_url="https://api.jarvisclaw.ai"
+)
+
+message = client.messages.create(
+    model="claude-sonnet-4-20250514",
+    max_tokens=1024,
+    messages=[{"role": "user", "content": "Explain quantum computing"}]
+)
+print(message.content[0].text)
+
+# Streaming
+with client.messages.stream(
+    model="claude-sonnet-4-20250514",
+    max_tokens=1024,
+    messages=[{"role": "user", "content": "Write a haiku"}]
+) as stream:
+    for text in stream.text_stream:
+        print(text, end="", flush=True)
+```
+
+> **When to use which?**
+> - `jarvisclaw` SDK — agents, x402 wallet payments, intent routing, budget control
+> - `openai` SDK — Responses API features, drop-in for existing OpenAI code
+> - `anthropic` SDK — Claude-native features (prompt caching, extended thinking, native tool_use)
+
 ## Budget Guards
 
 Never overspend. Set limits at any level:
