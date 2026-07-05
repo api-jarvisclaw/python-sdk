@@ -234,3 +234,71 @@ class IntentClient(BaseClient):
         if end is not None:
             params["end"] = end
         return self._get("/v1/aip/analytics/roi", params=params)
+
+
+    # ─── Discovery & Subscription ─────────────────────────────────────────────────
+
+    def discover(
+        self,
+        *,
+        intent_type: str | None = None,
+        protocol: str | None = None,
+        min_uptime: float | None = None,
+    ) -> dict[str, Any]:
+        """Discover AIP-compatible platforms via federation.
+
+        Args:
+            intent_type: Filter by supported intent type
+            protocol: Filter by protocol ("aip", "a2a", "mcp")
+            min_uptime: Minimum uptime percentage (0-100)
+
+        Returns dict with: platforms (list of discovered peers)
+        """
+        params: dict[str, Any] = {}
+        if intent_type is not None:
+            params["intent_type"] = intent_type
+        if protocol is not None:
+            params["protocol"] = protocol
+        if min_uptime is not None:
+            params["min_uptime"] = min_uptime
+        return self._get("/v1/intent/discover", params=params)
+
+    def subscribe(
+        self,
+        intent_type: str,
+        *,
+        webhook_url: str | None = None,
+        filters: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Subscribe to intent availability updates.
+
+        Args:
+            intent_type: Intent type to monitor
+            webhook_url: URL to receive notifications
+            filters: Optional filter criteria for notifications
+
+        Returns dict with: subscription_id, status
+        """
+        body: dict[str, Any] = {"intent_type": intent_type}
+        if webhook_url is not None:
+            body["webhook_url"] = webhook_url
+        if filters is not None:
+            body["filters"] = filters
+        return self._post("/v1/intent/subscribe", json=body)
+
+    def unsubscribe(self, subscription_id: str) -> dict[str, Any]:
+        """Cancel an intent subscription.
+
+        Args:
+            subscription_id: The subscription to cancel
+
+        Returns dict with: success, message
+        """
+        return self._delete(f"/v1/intent/subscribe/{subscription_id}")
+
+    def list_subscriptions(self) -> dict[str, Any]:
+        """List active subscriptions for the authenticated user.
+
+        Returns dict with: subscriptions (list)
+        """
+        return self._get("/v1/intent/subscribe")

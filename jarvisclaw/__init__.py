@@ -8,6 +8,7 @@ Quickstart:
 from .agent import Agent, BudgetExceededError, CostTracker
 from .audio import AudioClient
 from .chat import ChatClient
+from .prompt_coach import PromptCoachClient
 from .errors import (
     APIError,
     AuthenticationError,
@@ -17,6 +18,7 @@ from .errors import (
     RateLimitError,
 )
 from .image import ImageClient
+from .federation import FederationClient
 from .intent import IntentClient
 from .marketplace import MarketplaceClient
 from .openai_compat import OpenAI
@@ -38,6 +40,8 @@ __all__ = [
     "MarketplaceClient",
     "WalletClient",
     "IntentClient",
+    "FederationClient",
+    "PromptCoachClient",
     "MusicJob",
     "JarvisClawError",
     "APIError",
@@ -46,4 +50,4 @@ __all__ = [
     "InsufficientBalanceError",
     "PaymentError",
 ]
-__version__ = "2.0.0"
+__version__ = "2.2.0"
