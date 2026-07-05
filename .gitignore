@@ -4,3 +4,7 @@ __pycache__/
 dist/
 build/
 .eggs/
+
+# Windows cache artifacts
+%SystemDrive%/
+*.db
