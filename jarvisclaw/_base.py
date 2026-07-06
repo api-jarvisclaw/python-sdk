@@ -127,6 +127,9 @@ class BaseClient:
     def _put(self, path: str, **kwargs) -> Any:
         return self._request("PUT", path, **kwargs)
 
+    def _delete(self, path: str, **kwargs) -> Any:
+        return self._request("DELETE", path, **kwargs)
+
     def _post_raw(self, path: str, **kwargs) -> requests.Response:
         return self._request_raw("POST", path, **kwargs)
 

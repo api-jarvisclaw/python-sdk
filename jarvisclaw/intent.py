@@ -252,39 +252,73 @@ class IntentClient(BaseClient):
             protocol: Filter by protocol ("aip", "a2a", "mcp")
             min_uptime: Minimum uptime percentage (0-100)
 
-        Returns dict with: platforms (list of discovered peers)
+        Returns dict with: intents (list of discovered capabilities)
         """
-        params: dict[str, Any] = {}
+        body: dict[str, Any] = {}
         if intent_type is not None:
-            params["intent_type"] = intent_type
+            body["intent_type"] = intent_type
         if protocol is not None:
-            params["protocol"] = protocol
+            body["protocol"] = protocol
         if min_uptime is not None:
-            params["min_uptime"] = min_uptime
-        return self._get("/v1/intent/discover", params=params)
+            body["min_uptime"] = min_uptime
+        return self._post("/v1/intent/discover", json=body)
 
     def subscribe(
         self,
-        intent_type: str,
+        intent: str,
+        payload: dict[str, Any],
         *,
-        webhook_url: str | None = None,
-        filters: dict[str, Any] | None = None,
-    ) -> dict[str, Any]:
-        """Subscribe to intent availability updates.
+        budget: dict[str, Any] | None = None,
+        constraints: dict[str, Any] | None = None,
+        stream: bool = True,
+    ):
+        """Subscribe to an intent with streaming execution.
+
+        This is the streaming variant of execute() — the server resolves
+        the best provider and streams the response back via SSE.
 
         Args:
-            intent_type: Intent type to monitor
-            webhook_url: URL to receive notifications
-            filters: Optional filter criteria for notifications
+            intent: Intent type (e.g. "chat_completion", "web_search")
+            payload: The request payload (model, messages, etc.)
+            budget: Optional budget constraints
+            constraints: Optional routing constraints
+            stream: Whether to stream (default True)
 
-        Returns dict with: subscription_id, status
+        Returns:
+            If stream=True: generator yielding SSE event dicts with 'event' and 'data' keys
+            If stream=False: dict with the final JSON response
         """
-        body: dict[str, Any] = {"intent_type": intent_type}
-        if webhook_url is not None:
-            body["webhook_url"] = webhook_url
-        if filters is not None:
-            body["filters"] = filters
+        body: dict[str, Any] = {"intent": intent, "payload": payload}
+        if budget is not None:
+            body["budget"] = budget
+        if constraints is not None:
+            body["constraints"] = constraints
+        if stream:
+            body["stream"] = True
+            resp = self._post_raw("/v1/intent/subscribe", json=body, stream=True)
+            return self._iter_sse(resp)
         return self._post("/v1/intent/subscribe", json=body)
+
+    @staticmethod
+    def _iter_sse(resp):
+        """Parse Server-Sent Events from a streaming response."""
+        import json as _json
+        event_type = None
+        for line in resp.iter_lines(decode_unicode=True):
+            if line is None:
+                continue
+            if line.startswith("event:"):
+                event_type = line[6:].strip()
+            elif line.startswith("data:"):
+                data_str = line[5:].strip()
+                try:
+                    data = _json.loads(data_str)
+                except (ValueError, TypeError):
+                    data = data_str
+                yield {"event": event_type or "message", "data": data}
+                event_type = None
+            elif line == "":
+                continue
 
     def unsubscribe(self, subscription_id: str) -> dict[str, Any]:
         """Cancel an intent subscription.
