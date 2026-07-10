@@ -1,10 +1,17 @@
-"""JarvisClaw AI SDK — Agent-Native AIP experience with intent routing, tools, and budget control.
+"""JarvisClaw AI SDK — Unified AIP client with intent routing, streaming, and budget control.
 
 Quickstart:
+    from jarvisclaw import JarvisClaw
+
+    client = JarvisClaw(private_key="0x...")
+    result = client.execute("chat_completion", payload={"messages": [...]}, budget={"max_total_usd": 0.05})
+
+Agent mode (autonomous with tools):
     from jarvisclaw import Agent
-    agent = Agent()
-    print(agent.ask("what is AIP?"))
+    agent = Agent(private_key="0x...")
+    print(agent.ask("explain quantum computing"))
 """
+from .unified import JarvisClaw
 from .agent import Agent, BudgetExceededError, CostTracker
 from .audio import AudioClient
 from .chat import ChatClient
@@ -28,6 +35,7 @@ from .video import VideoClient
 from .wallet import WalletClient
 
 __all__ = [
+    "JarvisClaw",
     "Agent",
     "OpenAI",
     "CostTracker",
@@ -50,4 +58,4 @@ __all__ = [
     "InsufficientBalanceError",
     "PaymentError",
 ]
-__version__ = "2.2.0"
+__version__ = "2.3.0"

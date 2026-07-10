@@ -1,6 +1,6 @@
-# JarvisClaw SDK v2.0 — Agent-Native AIP
+# JarvisClaw Python SDK
 
-The fastest way to build AI agents with automatic intent routing, budget control, and crypto payments.
+The official Python SDK for [JarvisClaw AI](https://jarvisclaw.ai) — intent-based AI routing with x402 micropayments.
 
 ## Install
 
@@ -8,200 +8,265 @@ The fastest way to build AI agents with automatic intent routing, budget control
 pip install jarvisclaw
 ```
 
-## 3-Line Quickstart
+## Quick Start
 
 ```python
-from jarvisclaw import Agent
+from jarvisclaw import JarvisClaw
 
-agent = Agent()  # uses JARVISCLAW_API_KEY env var
-print(agent.ask("explain quantum computing in one sentence"))
+# x402 wallet mode (pay per request, no API key needed)
+client = JarvisClaw(private_key="0x...")
+
+# Or API key mode
+client = JarvisClaw(api_key="sk-...")
+
+# Execute an intent
+result = client.execute(
+    intent="chat_completion",
+    payload={"messages": [{"role": "user", "content": "Hello!"}]},
+    budget={"max_total_usd": 0.05}
+)
+print(result["result"]["content"])
 ```
 
-That's it. AIP resolves the best model for your intent, routes the request, handles payment (API key or x402 crypto), and returns the result.
+## Core API
 
-## Autonomous Agent with Tools
+### Resolve — Find the best provider without executing
+
+```python
+options = client.resolve(
+    intent="chat_completion",
+    payload={"messages": [{"role": "user", "content": "Explain AIP"}]},
+    constraints={"optimize": "cost", "max_latency_ms": 3000}
+)
+
+for match in options["matches"]:
+    print(f"{match['provider_id']} — ${match['estimated_cost_usd']:.4f}")
+```
+
+### Execute — Resolve + run in one call
+
+```python
+result = client.execute(
+    intent="chat_completion",
+    payload={
+        "messages": [{"role": "user", "content": "Write a haiku about distributed systems"}],
+        "temperature": 0.7,
+    },
+    budget={"max_total_usd": 0.10}
+)
+
+print(result["result"]["content"])
+print(f"Cost: ${result['actual_cost_usd']:.6f}")
+print(f"Provider: {result['provider']}")
+```
+
+### Execute with Budget Guard
+
+```python
+result = client.execute_budget(
+    intent="chat_completion",
+    payload={"messages": [{"role": "user", "content": "Summarize this paper"}]},
+    budget={"max_total_usd": 0.03},
+    constraints={"optimize": "cost"}
+)
+
+# Server enforces budget — will pick cheapest provider that fits
+print(f"Spent: ${result['actual_cost_usd']:.6f} (limit was $0.03)")
+```
+
+### Stream — Server-Sent Events
+
+```python
+for chunk in client.stream(
+    intent="chat_completion",
+    payload={"messages": [{"role": "user", "content": "Tell me a story"}]},
+    budget={"max_total_usd": 0.05}
+):
+    print(chunk, end="", flush=True)
+```
+
+### All Intent Types
+
+```python
+# Image generation
+result = client.execute(
+    intent="image_generation",
+    payload={"prompt": "A cyberpunk city at sunset", "size": "1024x1024"},
+    budget={"max_total_usd": 0.08}
+)
+print(result["result"]["url"])
+
+# Text-to-speech
+result = client.execute(
+    intent="text_to_speech",
+    payload={"text": "Hello world", "voice": "alloy"},
+    budget={"max_total_usd": 0.01}
+)
+# result["result"]["audio_url"]
+
+# Code generation
+result = client.execute(
+    intent="code_generation",
+    payload={"messages": [{"role": "user", "content": "Write a Python quicksort"}]},
+    budget={"max_total_usd": 0.05}
+)
+
+# Embeddings
+result = client.execute(
+    intent="embedding",
+    payload={"input": ["hello world", "goodbye world"]},
+    budget={"max_total_usd": 0.001}
+)
+```
+
+## Streaming Subscribe (Long-running)
+
+```python
+subscription = client.subscribe(
+    intent="chat_completion",
+    payload={"messages": [{"role": "user", "content": "Write an essay"}]},
+    budget={"max_total_usd": 0.10},
+    stream=True,
+)
+
+for event in subscription:
+    print(event, end="", flush=True)
+```
+
+## Analytics & Audit
+
+```python
+# Budget utilization
+status = client.budget_status(daily_budget=5.0, monthly_budget=100.0)
+print(f"Today: ${status['data']['daily_spent']:.2f} / $5.00")
+
+# Recent transactions
+history = client.audit_log(limit=20)
+for entry in history["entries"]:
+    print(f"{entry['intent']} → {entry['provider']} ${entry['cost_usd']:.4f}")
+
+# Cost breakdown by model
+breakdown = client.model_breakdown(days=7)
+for model in breakdown["models"]:
+    print(f"{model['model_id']}: ${model['total_cost']:.2f} ({model['requests']} reqs)")
+```
+
+## Federation — Peer Discovery
+
+```python
+# Discover other AIP-compatible platforms
+peers = client.discover_peers()
+for peer in peers["peers"]:
+    print(f"{peer['name']} — {peer['url']}")
+
+# Crawl the AIP network
+result = client.crawl_network(seed_urls=["https://peer.example.com/.well-known/aip.json"])
+print(f"Discovered {result['discovered']} new peers")
+```
+
+## Agent Mode — Autonomous with Tools
+
+For multi-step autonomous tasks with tool use and budget control:
 
 ```python
 from jarvisclaw import Agent
-import requests
 
-agent = Agent(default_budget=0.50)  # max $0.50 per run
+agent = Agent(private_key="0x...", default_budget=1.00)
 
 @agent.tool
 def search(query: str) -> str:
     """Search the web for current information."""
+    import requests
     resp = requests.get(f"https://api.search.com/v1?q={query}")
     return resp.json()["results"][0]["snippet"]
 
 @agent.tool
 def calculator(expression: str) -> str:
-    """Evaluate a mathematical expression."""
-    return str(eval(expression))  # sandboxed in production
+    """Evaluate a math expression."""
+    return str(eval(expression))
 
-# The agent autonomously decides when to use tools
-result = agent.run("What's the mass of Jupiter in kg, and what's that divided by Earth's mass?")
-print(result.text)           # Final answer
-print(result.cost.spent_usd) # How much it cost
-print(result.iterations)     # How many LLM calls
+result = agent.run("What's Jupiter's mass divided by Earth's mass?")
+print(result.text)
+print(f"Cost: ${result.cost.spent_usd:.4f}")
+print(f"Iterations: {result.iterations}")
 ```
 
-## Streaming
+### Agent Streaming
 
 ```python
-from jarvisclaw import Agent
-
-agent = Agent()
-for chunk in agent.stream("write a haiku about distributed systems"):
+agent = Agent(private_key="0x...")
+for chunk in agent.stream("Write a haiku about distributed systems"):
     print(chunk, end="", flush=True)
 ```
 
-## OpenAI Drop-in Replacement
-
-Zero code changes. Just swap the import:
+### Agent Budget Guards
 
 ```python
-# Before:
-# from openai import OpenAI
+from jarvisclaw import Agent, BudgetExceededError
 
-# After:
-from jarvisclaw.openai_compat import OpenAI
+agent = Agent(default_budget=2.00)
 
-client = OpenAI()  # uses JARVISCLAW_API_KEY
-resp = client.chat.completions.create(
-    model="gpt-4o",
-    messages=[{"role": "user", "content": "hello"}],
-)
-print(resp.choices[0].message.content)
+try:
+    result = agent.run("analyze this massive dataset", budget=0.50)
+except BudgetExceededError as e:
+    print(f"Stopped at ${e.spent:.4f} — limit was ${e.budget:.2f}")
 ```
 
-You get AIP intent routing, automatic provider failover, and optional x402 crypto payments — all invisible to your existing code.
+## x402 Wallet Payments
 
-## Using Official SDKs Natively
+Pay per-request with on-chain USDC. No API key, no account needed:
 
-You can also use the official `openai` or `anthropic` Python SDKs directly against JarvisClaw — just set the `base_url`:
+```python
+# EVM (Base network)
+client = JarvisClaw(private_key="0x...")
 
-### OpenAI SDK (Responses API)
+# Solana
+client = JarvisClaw(private_key="base58...", network="solana")
+
+# Check balance
+balance = client.get_balance()
+print(f"Wallet balance: ${balance:.2f} USDC")
+```
+
+## OpenAI / Anthropic SDK Compatibility
+
+Use official SDKs directly against JarvisClaw — just change the base URL:
 
 ```python
 from openai import OpenAI
 
 client = OpenAI(
-    api_key="sk-your-jarvisclaw-key",  # or set OPENAI_API_KEY env
+    api_key="sk-your-jarvisclaw-key",
     base_url="https://api.jarvisclaw.ai/v1"
 )
 
-# Responses API (next-gen)
-response = client.responses.create(
-    model="anthropic/claude-sonnet-4-20250514",
-    input="Explain quantum computing in one paragraph"
-)
-print(response.output_text)
-
-# Chat Completions (classic)
 resp = client.chat.completions.create(
-    model="openai/gpt-4.1",
+    model="anthropic/claude-sonnet-4-20250514",
     messages=[{"role": "user", "content": "Hello!"}]
 )
 print(resp.choices[0].message.content)
 ```
 
-### Anthropic SDK (Native Messages API)
-
 ```python
 import anthropic
 
 client = anthropic.Anthropic(
-    api_key="sk-your-jarvisclaw-key",  # or set ANTHROPIC_API_KEY env
+    api_key="sk-your-jarvisclaw-key",
     base_url="https://api.jarvisclaw.ai"
 )
 
 message = client.messages.create(
     model="claude-sonnet-4-20250514",
     max_tokens=1024,
-    messages=[{"role": "user", "content": "Explain quantum computing"}]
+    messages=[{"role": "user", "content": "Hello!"}]
 )
 print(message.content[0].text)
-
-# Streaming
-with client.messages.stream(
-    model="claude-sonnet-4-20250514",
-    max_tokens=1024,
-    messages=[{"role": "user", "content": "Write a haiku"}]
-) as stream:
-    for text in stream.text_stream:
-        print(text, end="", flush=True)
 ```
 
 > **When to use which?**
-> - `jarvisclaw` SDK — agents, x402 wallet payments, intent routing, budget control
-> - `openai` SDK — Responses API features, drop-in for existing OpenAI code
-> - `anthropic` SDK — Claude-native features (prompt caching, extended thinking, native tool_use)
-
-## Budget Guards
-
-Never overspend. Set limits at any level:
-
-```python
-# Per-agent default
-agent = Agent(default_budget=5.00)
-
-# Per-run override
-result = agent.run("analyze this dataset", budget=1.00)
-
-# Session tracking
-print(agent.cost_summary())
-# {'budget_usd': 5.0, 'spent_usd': 0.0342, 'remaining_usd': 4.9658, 'requests': 3}
-
-# Server-side limits
-agent.set_limits(daily_max_usd=10.0, per_request_max_usd=0.50)
-```
-
-If budget is exceeded, `BudgetExceededError` is raised — your agent stops cleanly, never runs away.
-
-## x402 Crypto Payments (Wallet Mode)
-
-Pay per-request with on-chain USDC. No API key needed:
-
-```python
-from jarvisclaw import Agent
-
-# EVM wallet
-agent = Agent(private_key="0x...")
-
-# Solana wallet  
-agent = Agent(private_key="base58...", network="solana")
-
-# Works identically — AIP handles payment signing
-result = agent.ask("summarize this research paper")
-print(agent.session_cost.spent_usd)  # exact cost
-```
-
-## Intent Resolution
-
-See what AIP routes look like under the hood:
-
-```python
-resolution = agent.resolve(
-    "image_generation",
-    max_price=0.05,
-    features=["high_resolution"],
-    optimize="quality"
-)
-print(resolution["matches"][0]["provider_id"])  # e.g. "dall-e-3"
-```
-
-## All Capabilities
-
-| Feature | Method | Description |
-|---------|--------|-------------|
-| Single Q&A | `agent.ask(prompt)` | One-shot, returns text |
-| Autonomous | `agent.run(task)` | Multi-turn with tools |
-| Streaming | `agent.stream(prompt)` | Yields chunks |
-| OpenAI compat | `OpenAI().chat.completions.create(...)` | Drop-in |
-| Balance | `agent.balance()` | Wallet/quota info |
-| History | `agent.history()` | Transaction log |
-| Providers | `agent.list_providers()` | Available models |
-| Limits | `agent.set_limits(...)` | Spending caps |
+> - `JarvisClaw` — intent routing, x402 payments, budget control, federation
+> - `Agent` — autonomous multi-step tasks with tools
+> - `openai`/`anthropic` SDK — drop-in for existing code, Claude/GPT native features
 
 ## Configuration
 
@@ -211,36 +276,27 @@ print(resolution["matches"][0]["provider_id"])  # e.g. "dall-e-3"
 | `JARVISCLAW_WALLET_KEY` | x402 private key (EVM or Solana) |
 | `JARVISCLAW_BASE_URL` | Custom endpoint (default: `https://api.jarvisclaw.ai`) |
 
-## Architecture: How AIP Works
-
-```
-Your Code → Agent SDK → Intent Resolution → Risk Check → Route to Best Provider
-                              ↓                                    ↓
-                       Budget Guard                         Execute + Settle
-                              ↓                                    ↓
-                       Cost Tracking ←←←←←←←←←←←←←←←← Audit Trail
-```
-
-The Agent Intent Protocol (AIP) resolves your request to the optimal provider based on:
-- **Cost**: cheapest model that meets quality threshold
-- **Quality**: best model within budget
-- **Latency**: fastest response time
-
-## Migration from v1.x
+## Migration from v2.x
 
 ```python
-# v1.x — still works!
-from jarvisclaw import ChatClient
-client = ChatClient(api_key="sk-...")
-resp = client.chat("hello")
+# v2.x — still works
+from jarvisclaw import IntentClient
+client = IntentClient(private_key="0x...")
+client.execute(...)
 
-# v2.0 — recommended
-from jarvisclaw import Agent
-agent = Agent(api_key="sk-...")
-print(agent.ask("hello"))
+# v2.3+ — recommended unified interface
+from jarvisclaw import JarvisClaw
+client = JarvisClaw(private_key="0x...")
+client.execute(...)
 ```
 
-All v1.x client classes (`ChatClient`, `ImageClient`, etc.) remain available and unchanged.
+All existing classes (`IntentClient`, `Agent`, `ChatClient`, etc.) remain available and unchanged.
+
+## Links
+
+- [AIP Protocol Spec](https://docs.jarvisclaw.ai/aip)
+- [SDK Reference](https://docs.jarvisclaw.ai/sdk)
+- [Telegram](https://t.me/JarvisClawai)
 
 ## License
 
