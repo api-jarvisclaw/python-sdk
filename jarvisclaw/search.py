@@ -124,3 +124,56 @@ class SearchClient(BaseClient):
             },
         )
         return data.get("results", data.get("data", []))
+
+    def exa_search(self, query: str, *, num_results: int = 10, **kwargs: Any) -> list[SearchResult]:
+        """Neural web search via the marketplace Exa service.
+
+        Distinct from query(): that routes /v1/search to a search-capable chat
+        model, while this hits Exa directly and returns structured results.
+
+        Args:
+            query: Search query.
+            num_results: Maximum results to return.
+            **kwargs: Additional Exa params forwarded verbatim.
+        """
+        data = self._post(
+            "/v1/marketplace/exa/search",
+            json={"query": query, "numResults": num_results, **kwargs},
+        )
+        return self._parse_results(data)
+
+    def answer(self, query: str, *, num_results: int = 10) -> dict[str, Any]:
+        """Get an AI answer grounded in live search results, via Exa.
+
+        Returns dict with:
+            - answer (str): the generated answer
+            - citations (list[SearchResult]): the sources it drew on
+            - raw (dict): the unmodified response
+        """
+        data = self._post(
+            "/v1/marketplace/exa/answer",
+            json={"query": query, "numResults": num_results},
+        )
+        return {
+            "answer": data.get("answer", ""),
+            "citations": self._parse_results(data),
+            "raw": data,
+        }
+
+    @staticmethod
+    def _parse_results(data: dict[str, Any]) -> list[SearchResult]:
+        """Extract SearchResult items from an Exa-style response."""
+        results = data.get("results")
+        if not isinstance(results, list):
+            results = data.get("data")
+        if not isinstance(results, list):
+            return []
+        return [
+            SearchResult(
+                title=r.get("title", ""),
+                url=r.get("url", ""),
+                snippet=r.get("text", r.get("snippet", "")),
+            )
+            for r in results
+            if isinstance(r, dict)
+        ]

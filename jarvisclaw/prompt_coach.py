@@ -1,4 +1,4 @@
-"""PromptCoachClient — AI-powered prompt optimization and scoring."""
+"""PromptCoachClient — AI-powered prompt optimization."""
 from __future__ import annotations
 
 from typing import Any
@@ -7,9 +7,10 @@ from ._base import BaseClient
 
 
 class PromptCoachClient(BaseClient):
-    """Prompt Coach client for optimizing and scoring prompts.
+    """Prompt Coach client for optimizing prompts.
 
-    Fixed pricing: $0.002 USDC per request regardless of options.
+    The coaching model is chosen by the gateway; the `model` argument only tells
+    the coach which model your prompt is destined for.
 
     Usage:
         from jarvisclaw import PromptCoachClient
@@ -18,9 +19,9 @@ class PromptCoachClient(BaseClient):
         coach = PromptCoachClient(api_key="sk-...")
         result = coach.optimize("make me a website", context="portfolio site")
 
-        # x402 mode (Agent wallet pays directly)
+        # x402 mode (agent wallet pays directly)
         coach = PromptCoachClient(private_key="0x...")
-        result = coach.optimize("explain AI", optimize_for="technical")
+        result = coach.optimize("explain AI", context="for a physics undergrad")
     """
 
     def optimize(
@@ -29,57 +30,57 @@ class PromptCoachClient(BaseClient):
         *,
         context: str | None = None,
         model: str | None = None,
-        optimize_for: str | None = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
-        """Optimize a prompt and return suggestions.
+        """Optimize a prompt and return suggestions plus before/after scores.
 
         Args:
             prompt: The original prompt to optimize.
-            context: Optional context about usage (e.g., "technical blog for developers").
-            model: Target model the prompt will be used with (e.g., "gpt-4o").
-            optimize_for: Optimization strategy — "clarity", "technical", "creative".
-            **kwargs: Additional params passed to the API.
+            context: Optional context about the use case (e.g. "technical blog
+                for developers").
+            model: The model the prompt will be used with (e.g. "gpt-4o"). This
+                is passed to the coach as information only — it does not select
+                the coaching model.
+            **kwargs: Additional params forwarded in the request body.
 
         Returns:
             dict with keys:
-                - optimized_prompt (str): The improved prompt.
-                - suggestions (list[str]): Specific improvement suggestions.
-                - score (float): Quality score of the optimized prompt (0-10).
-                - score_before (float): Quality score of the original prompt.
-                - score_after (float): Quality score after optimization.
+                - original_prompt (str)
+                - optimized_prompt (str): the improved prompt
+                - explanation (str): what changed and why
+                - score_before (int): quality of the original, 1-100
+                - score_after (int): quality after optimization, 1-100
+                - suggestions (list[str]): specific improvements
+                - model_used (str): the coaching model the gateway picked
+
+            Note the scores are integers on a 1-100 scale, not 0-10.
+
+        There is no separate score-only endpoint: to grade a prompt without
+        rewriting it, call this and read score_before.
         """
         body: dict[str, Any] = {"prompt": prompt, **kwargs}
         if context is not None:
             body["context"] = context
         if model is not None:
             body["model"] = model
-        if optimize_for is not None:
-            body["optimize_for"] = optimize_for
 
-        return self._request("POST", "/v1/prompt-coach/optimize", json=body)
+        data = self._post("/v1/prompt-coach/optimize", json=body)
+        # The handler wraps its result as {"success": true, "data": {...}} rather
+        # than returning the object at the top level.
+        if isinstance(data, dict) and "data" in data:
+            if not data.get("success", True):
+                from .errors import APIError
 
-    def score(
-        self,
-        prompt: str,
-        *,
-        model: str | None = None,
-        **kwargs: Any,
-    ) -> dict[str, Any]:
-        """Score a prompt without optimizing it.
+                raise APIError(200, "prompt optimization failed", data)
+            return data["data"]
+        return data
 
-        Args:
-            prompt: The prompt to evaluate.
-            model: Target model context for scoring.
-            **kwargs: Additional params passed to the API.
+    def score(self, prompt: str, *, model: str | None = None, **kwargs: Any) -> int:
+        """Score a prompt's quality on a 1-100 scale.
 
-        Returns:
-            dict with keys:
-                - score (float): Quality score (0-10).
-                - breakdown (dict): Per-dimension scores (clarity, specificity, etc.).
+        Convenience wrapper over optimize() returning score_before. The gateway
+        has no score-only endpoint — /v1/prompt-coach/score does not exist — so
+        this costs the same as a full optimize call.
         """
-        body: dict[str, Any] = {"prompt": prompt, **kwargs}
-        if model is not None:
-            body["model"] = model
-
-        return self._request("POST", "/v1/prompt-coach/score", json=body)
+        result = self.optimize(prompt, model=model, **kwargs)
+        return int(result.get("score_before", 0))

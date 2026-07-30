@@ -133,6 +133,40 @@ class JarvisClaw(BaseClient):
             body["constraints"] = constraints
         return self._post("/v1/intent/execute", json=body)
 
+    def execute_budget(
+        self,
+        intent: str,
+        payload: dict[str, Any],
+        budget: dict[str, Any],
+        *,
+        constraints: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Execute an intent with a hard spend cap and settlement tracking.
+
+        Identical to execute() with a budget, kept as its own name because that
+        is how the endpoint is documented.
+
+        Args:
+            intent: Intent type
+            payload: Request body forwarded to the provider
+            budget: Must include max_total_usd. Optional:
+                preferred_payment_method ("x402" | "api_key"), allow_overdraft.
+            constraints: Optional routing constraints
+
+        Returns dict with: request_id, status, provider, model, result,
+        actual_cost_usd, settlement, risk_level, duration_ms, reason
+        """
+        if not budget or "max_total_usd" not in budget:
+            raise ValueError("budget must include max_total_usd")
+        body: dict[str, Any] = {
+            "intent": intent,
+            "payload": payload,
+            "budget": budget,
+        }
+        if constraints is not None:
+            body["constraints"] = constraints
+        return self._post("/v1/intent/execute-budget", json=body)
+
     # ─── Streaming ────────────────────────────────────────────────────────────────
 
     def stream(
@@ -140,168 +174,359 @@ class JarvisClaw(BaseClient):
         intent: str,
         payload: dict[str, Any],
         *,
-        budget: dict[str, Any] | None = None,
         constraints: dict[str, Any] | None = None,
+        preferences: dict[str, Any] | None = None,
+        optimize_for: str | None = None,
     ) -> Generator[dict[str, Any], None, None]:
-        """Execute an intent with streaming response via SSE.
+        """Execute an intent with the response streamed back over SSE.
 
-        Same parameters as execute(), but returns a generator of SSE events.
+        Args:
+            intent: Intent type
+            payload: The provider request body. Required.
+            constraints: Optional routing constraints
+            preferences: Optional optimization preferences
+            optimize_for: Shorthand for preferences["optimize_for"] using the
+                subscribe vocabulary: "speed", "cost" or "quality"
 
         Yields:
-            Dict with 'event' and 'data' keys:
-            - event="chunk": partial content (data.content has the text delta)
-            - event="usage": token usage update
-            - event="done": final settlement info (data.actual_cost_usd, data.settlement)
-            - event="error": error occurred during streaming
+            Dicts with 'event' and 'data'. The first event is "metadata"
+            (provider, intent, model) and the last is "done". In between the
+            gateway relays the upstream events verbatim, so for chat completions
+            'data' holds OpenAI-style chunks — including the literal "[DONE]"
+            sentinel, which is not JSON and comes through as a string.
+
+        Note this endpoint takes no budget: use execute_budget() for a spend cap.
 
         Example:
             for event in client.stream("chat_completion", payload={...}):
-                if event["event"] == "chunk":
-                    print(event["data"]["content"], end="", flush=True)
-                elif event["event"] == "done":
-                    print(f"\\nCost: ${event['data']['actual_cost_usd']}")
+                if event["event"] == "metadata":
+                    print("provider:", event["data"]["provider"])
+                    continue
+                chunk = event["data"]
+                if isinstance(chunk, dict):
+                    delta = chunk.get("choices", [{}])[0].get("delta", {})
+                    print(delta.get("content", ""), end="", flush=True)
         """
-        body: dict[str, Any] = {
-            "intent": intent,
-            "payload": payload,
-            "stream": True,
-        }
-        if budget is not None:
-            body["budget"] = budget
+        if not payload:
+            raise ValueError("payload is required")
+        body: dict[str, Any] = {"intent": intent, "payload": payload}
         if constraints is not None:
             body["constraints"] = constraints
+        if preferences is not None:
+            body["preferences"] = preferences
+        if optimize_for is not None:
+            body["optimize_for"] = optimize_for
         resp = self._post_raw("/v1/intent/subscribe", json=body, stream=True)
         return self._iter_sse(resp)
 
+    # subscribe() is the documented name for the streaming call; stream() is the
+    # shorter alias. Both hit POST /v1/intent/subscribe.
+    subscribe = stream
+
     @staticmethod
     def _iter_sse(resp) -> Generator[dict[str, Any], None, None]:
-        """Parse Server-Sent Events from a streaming response."""
+        """Parse Server-Sent Events from a streaming response.
+
+        See IntentClient._iter_sse — same framing rules: optional single space
+        after "field:", repeated data: lines joined with newlines, comments
+        skipped, and a trailing event flushed even without a final blank line.
+        """
         import json as _json
 
         event_type = None
+        data_lines: list[str] = []
+
+        def _emit() -> dict[str, Any]:
+            raw = "\n".join(data_lines)
+            try:
+                data = _json.loads(raw)
+            except (ValueError, TypeError):
+                data = raw
+            return {"event": event_type or "message", "data": data}
+
         for line in resp.iter_lines(decode_unicode=True):
             if line is None:
                 continue
-            if line.startswith("event:"):
-                event_type = line[6:].strip()
-            elif line.startswith("data:"):
-                data_str = line[5:].strip()
-                try:
-                    data = _json.loads(data_str)
-                except (ValueError, TypeError):
-                    data = data_str
-                yield {"event": event_type or "message", "data": data}
-                event_type = None
-            elif line == "":
+            line = line.rstrip("\r")
+            if line == "":
+                if event_type is not None or data_lines:
+                    yield _emit()
+                    event_type = None
+                    data_lines = []
                 continue
+            if line.startswith(":"):
+                continue
+            name, sep, value = line.partition(":")
+            if not sep:
+                continue
+            if value.startswith(" "):
+                value = value[1:]
+            if name == "event":
+                event_type = value
+            elif name == "data":
+                data_lines.append(value)
+
+        if event_type is not None or data_lines:
+            yield _emit()
 
     # ─── Analytics / Audit ────────────────────────────────────────────────────────
+    #
+    # The old /v1/aip/analytics/* endpoints were removed from the gateway and
+    # consolidated into /api/analytics/aggregate, where AIP usage appears with
+    # api_source="aip". Scope comes from the auth context, so there is no "scope"
+    # parameter: a non-admin only ever sees their own rows.
 
-    def audit(
+    def spend(
         self,
         *,
-        start: int | None = None,
-        end: int | None = None,
-        scope: str = "self",
-    ) -> dict[str, Any]:
-        """Get usage analytics and spending history.
+        period: str = "7d",
+        group_by: list[str] | None = None,
+        model: str | None = None,
+        user_id: int | None = None,
+        filters: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Get aggregated spend and settlement rows.
 
         Args:
-            start: Start time as unix timestamp (default: 24h ago)
-            end: End time as unix timestamp (default: now)
-            scope: "self" for current user, "global" for admin view
+            period: "24h", "7d" (default), "30d" or "90d".
+            group_by: Any of "day", "model", "api_source", "principal_type",
+                "channel", "group", "client_id". Defaults to
+                ["day", "model", "api_source"].
+            model: Restrict to one model name.
+            user_id: Widen scope to another user. Admin-only; ignored otherwise.
+            filters: Exact-match filters keyed by dimension, e.g.
+                {"api_source": "aip"}.
 
-        Returns:
-            Dict with: success, data containing:
-            - daily_spent, monthly_spent, remaining
-            - model_breakdown (list of per-model usage)
-            - alerts (budget warnings)
+        Returns a list of rows with the requested dimension keys plus
+        total_quota, total_reqs, total_cost_usd, revenue_usd, settle_done,
+        settle_failed, delivered, undelivered, loss_usd.
         """
-        params: dict[str, Any] = {"scope": scope}
-        if start is not None:
-            params["start"] = start
-        if end is not None:
-            params["end"] = end
-        return self._get("/v1/aip/analytics/budget", params=params)
+        params: dict[str, Any] = {"period": period}
+        if group_by:
+            params["group_by"] = ",".join(group_by)
+        if model is not None:
+            params["model"] = model
+        if user_id is not None:
+            params["user_id"] = user_id
+        for key, value in (filters or {}).items():
+            params[f"filter_{key}"] = value
 
-    def model_breakdown(
+        data = self._get("/api/analytics/aggregate", params=params)
+        if not data.get("success", True):
+            from .errors import APIError
+
+            raise APIError(200, data.get("message", "analytics request failed"), data)
+        return data.get("data") or []
+
+    def model_breakdown(self, *, period: str = "7d", **kwargs: Any) -> list[dict[str, Any]]:
+        """Per-model cost and request breakdown for the period."""
+        kwargs.pop("group_by", None)
+        return self.spend(period=period, group_by=["model"], **kwargs)
+
+    def daily_trend(self, *, period: str = "30d", **kwargs: Any) -> list[dict[str, Any]]:
+        """One spend row per calendar day in the period."""
+        kwargs.pop("group_by", None)
+        return self.spend(period=period, group_by=["day"], **kwargs)
+
+    def audit_log(self) -> dict[str, Any]:
+        """Get the AIP orchestrator audit trail for recent requests.
+
+        Returns dict with: entries, count.
+
+        This is the request-level event log, not spend analytics — use spend()
+        for cost figures.
+        """
+        return self._get("/v1/intent/audit")
+
+    # audit() is the shorter alias for the same endpoint.
+    audit = audit_log
+
+    def budget_status(
         self,
         *,
-        start: int | None = None,
-        end: int | None = None,
-        top_n: int = 10,
-        scope: str = "self",
+        daily_budget: float = 10.0,
+        monthly_budget: float = 200.0,
     ) -> dict[str, Any]:
-        """Get per-model usage breakdown.
+        """Compute budget utilisation from actual spend.
+
+        The gateway has no budget endpoint — the old /v1/aip/analytics/budget was
+        removed — so this derives the figures from spend() locally. The limits you
+        pass are the ones compared against; they are not read from the server.
 
         Args:
-            start: Start time as unix timestamp (default: 24h ago)
-            end: End time as unix timestamp (default: now)
-            top_n: Number of top models to return
-            scope: "self" for current user, "global" for admin view
+            daily_budget: Daily limit in USD to compare against.
+            monthly_budget: Monthly limit in USD to compare against.
 
-        Returns:
-            Dict with model entries containing: model_name, requests,
-            total_tokens, cost_usd
+        Returns dict with: daily_spent, monthly_spent, daily_budget,
+        monthly_budget, daily_remaining, monthly_remaining, daily_pct,
+        monthly_pct, alerts (list of human-readable warnings).
         """
-        params: dict[str, Any] = {"top_n": top_n, "scope": scope}
-        if start is not None:
-            params["start"] = start
-        if end is not None:
-            params["end"] = end
-        return self._get("/v1/aip/analytics/models", params=params)
+        daily_rows = self.spend(period="24h", group_by=["day"])
+        monthly_rows = self.spend(period="30d", group_by=["day"])
+
+        def _total(rows: list[dict[str, Any]]) -> float:
+            return sum(float(r.get("total_cost_usd") or 0.0) for r in rows)
+
+        daily_spent = _total(daily_rows)
+        monthly_spent = _total(monthly_rows)
+
+        alerts: list[str] = []
+        daily_pct = (daily_spent / daily_budget * 100) if daily_budget > 0 else 0.0
+        monthly_pct = (monthly_spent / monthly_budget * 100) if monthly_budget > 0 else 0.0
+        if daily_pct >= 100:
+            alerts.append(f"daily budget exceeded: ${daily_spent:.4f} of ${daily_budget:.2f}")
+        elif daily_pct >= 80:
+            alerts.append(f"daily budget at {daily_pct:.0f}%")
+        if monthly_pct >= 100:
+            alerts.append(f"monthly budget exceeded: ${monthly_spent:.4f} of ${monthly_budget:.2f}")
+        elif monthly_pct >= 80:
+            alerts.append(f"monthly budget at {monthly_pct:.0f}%")
+
+        return {
+            "daily_spent": daily_spent,
+            "monthly_spent": monthly_spent,
+            "daily_budget": daily_budget,
+            "monthly_budget": monthly_budget,
+            "daily_remaining": max(0.0, daily_budget - daily_spent),
+            "monthly_remaining": max(0.0, monthly_budget - monthly_spent),
+            "daily_pct": daily_pct,
+            "monthly_pct": monthly_pct,
+            "alerts": alerts,
+        }
 
     # ─── Discovery & Federation ───────────────────────────────────────────────────
 
     def discover(
         self,
         *,
-        intent_type: str | None = None,
-        protocol: str | None = None,
-        min_uptime: float | None = None,
+        intent: str | None = None,
+        features: list[str] | None = None,
+        max_price: float | None = None,
+        public: bool = False,
     ) -> dict[str, Any]:
-        """Discover AIP-compatible platforms via federation.
+        """Discover the intents and providers this gateway and its peers serve.
 
         Args:
-            intent_type: Filter by supported intent type
-            protocol: Filter by protocol ("aip", "a2a", "mcp")
-            min_uptime: Minimum uptime percentage (0-100)
+            intent: Restrict to one intent type. Omit for everything.
+            features: Require providers to support ALL of these features.
+            max_price: Cap the estimated per-request price in USD.
+            public: Use the free unauthenticated GET route. Same response shape.
 
         Returns:
-            Dict with: intents (list of discovered capabilities with
-            provider, endpoint, supported_intents, uptime, pricing)
+            Dict with: intents (type, description, features, provider_count),
+            providers (id, name, intents, features, pricing, endpoint, source),
+            federated (peer-contributed entries), total.
+            `total` counts providers only.
         """
+        if public:
+            params: dict[str, Any] = {}
+            if intent is not None:
+                params["intent"] = intent
+            if features:
+                params["features"] = ",".join(features)
+            if max_price is not None:
+                params["max_price"] = max_price
+            return self._get("/v1/intent/discover", params=params)
+
         body: dict[str, Any] = {}
-        if intent_type is not None:
-            body["intent_type"] = intent_type
-        if protocol is not None:
-            body["protocol"] = protocol
-        if min_uptime is not None:
-            body["min_uptime"] = min_uptime
+        if intent is not None:
+            body["intent"] = intent
+        if features:
+            body["features"] = features
+        if max_price is not None:
+            body["max_price"] = max_price
         return self._post("/v1/intent/discover", json=body)
 
-    def federation_peers(
+    def resolve_natural(
         self,
+        query: str,
         *,
-        status: str | None = None,
-        protocol: str | None = None,
+        session_id: str | None = None,
+        constraints: dict[str, Any] | None = None,
+        preferences: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """List known federation peers.
+        """Resolve a free-text request to an intent and ranked providers.
 
-        Args:
-            status: Filter by status ("active", "unreachable")
-            protocol: Filter by protocol ("aip", "a2a", "mcp")
-
-        Returns:
-            Dict with: peers (list of peer objects with endpoint, status,
-            last_seen, supported_intents)
+        Returns dict with: status ("resolved" | "clarify" | "budget_insufficient"
+        | "no_match"), session_id, intent, confidence, matches, clarify, message.
+        On "clarify", ask clarify["question"] and retry with the same session_id.
         """
-        params: dict[str, Any] = {}
-        if status is not None:
-            params["status"] = status
-        if protocol is not None:
-            params["protocol"] = protocol
-        return self._get("/v1/aip/federation/peers", params=params)
+        if not query or not query.strip():
+            raise ValueError("query is required")
+        body: dict[str, Any] = {"query": query}
+        if session_id is not None:
+            body["session_id"] = session_id
+        if constraints is not None:
+            body["constraints"] = constraints
+        if preferences is not None:
+            body["preferences"] = preferences
+        return self._post("/v1/intent/resolve/natural", json=body)
+
+    def network_stats(self) -> dict[str, Any]:
+        """Get provider and federation counts. Public, no auth required."""
+        return self._get("/v1/network/stats")
+
+    def discover_peers(self, *, page: int = 1, page_size: int = 20) -> dict[str, Any]:
+        """List federation peers from the public registry.
+
+        Returns dict with: success, data (server_uuid, name, base_url, network,
+        verified, resource_count, healthy, last_checked_at, aip_version,
+        discover_url, latency_ms), total, page, page_size.
+
+        Public — no auth required. This is not /v1/aip/federation/peers, which is
+        admin-only and needs a dashboard session rather than an API key; see
+        FederationClient.list_peers for that one.
+        """
+        return self._get(
+            "/v1/federation/servers",
+            params={"page": page, "page_size": page_size},
+        )
+
+    # federation_peers() is the older alias for discover_peers().
+    federation_peers = discover_peers
+
+    def search_federation(
+        self,
+        query: str = "",
+        *,
+        category: str | None = None,
+        limit: int = 20,
+    ) -> dict[str, Any]:
+        """Search callable resources across every known federation peer.
+
+        Public — no auth required.
+
+        Returns dict with: success, data (name, path, method, description,
+        category, tags, sell_price, price_unit, currency, network, popular,
+        call_count, server_name), count.
+        """
+        params: dict[str, Any] = {"limit": limit}
+        if query:
+            params["q"] = query
+        if category is not None:
+            params["category"] = category
+        return self._get("/v1/federation/search", params=params)
+
+    def federation_execute(self, request: dict[str, Any]) -> dict[str, Any]:
+        """Invoke a federated resource; the gateway settles with the peer.
+
+        Requires an API key or x402 payment.
+        """
+        return self._post("/v1/federation/execute", json=request)
+
+    def crawl_network(self) -> dict[str, Any]:
+        """Trigger an immediate crawl of every registered federation peer.
+
+        Admin-only: POST /v1/aip/federation/crawl sits behind AdminAuth, which
+        needs a dashboard session or an access token plus a New-Api-User header.
+        An API key or x402 wallet gets 401 here.
+
+        The crawl covers all registered peers and takes no seed or depth — register
+        targets first with FederationClient.add_peer.
+
+        Returns dict with: message, peers_crawled, healthy, results.
+        """
+        return self._post("/v1/aip/federation/crawl", json={})
 
     # ─── Balance ──────────────────────────────────────────────────────────────────
 
