@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "jarvisclaw"
-version = "3.0.0"
+version = "3.0.1"
 description = "JarvisClaw Agent SDK — Agent-Native AIP with autonomous tool loops, budget guards, streaming, and OpenAI drop-in compatibility."
 readme = "README.md"
 license = {text = "MIT"}
