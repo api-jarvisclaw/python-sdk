@@ -9,7 +9,7 @@ from typing import Any
 
 import requests
 
-from .auth import APIKeyAuth, AuthStrategy, X402Auth, SolanaX402Auth
+from .auth import APIKeyAuth, AuthStrategy, X402Auth
 from .errors import (
     APIError,
     AuthenticationError,
@@ -101,15 +101,27 @@ class BaseClient:
     # ─── Utility ────────────────────────────────────────────
 
     def get_balance(self) -> float:
-        """Get current balance in USD.
+        """Get current spendable balance in USD.
 
-        - x402 mode: queries on-chain USDC balance via public RPC
-        - API Key mode: queries remaining quota via billing API
+        - x402 mode: reads the wallet's on-chain USDC balance directly, on Base
+          for an EVM key and on Solana mainnet for a Solana key.
+        - API Key mode: reads the OpenAI-compatible billing endpoint. When the
+          account has an HD deposit wallet the gateway reports the real on-chain
+          balance there; otherwise it reports the ledger quota in USD.
         """
         if self._auth.address:
+            from .auth import SolanaX402Auth
+
+            if isinstance(self._auth, SolanaX402Auth):
+                return self._query_solana_usdc_balance()
             return self._query_onchain_balance()
+
         data = self._get("/v1/dashboard/billing/subscription")
-        # OpenAI-compatible billing response: hard_limit_usd = remaining + used
+        # This endpoint answers 200 with an {"error": {...}} body on failure
+        # instead of a 4xx, so _request_raw cannot catch it by status.
+        err = data.get("error")
+        if isinstance(err, dict) and err.get("message"):
+            raise APIError(200, err["message"], data)
         return data.get("hard_limit_usd", 0.0)
 
     def get_spending(self) -> float:
@@ -221,22 +233,72 @@ class BaseClient:
         raise APIError(500, "Request failed after retries", {})
 
     def _query_onchain_balance(self) -> float:
-        """Query USDC balance on Base chain via public RPC."""
+        """Query USDC balance on Base via public RPC (EVM keys only)."""
         usdc_contract = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
-        address = self._auth.address
-        padded_addr = "0x70a08231" + address[2:].lower().zfill(64)
+        address = self._auth.address or ""
+
+        # balanceOf(address): 4-byte selector + the address right-aligned in a
+        # 32-byte word. Strip 0x only if present — a bare hex address would
+        # otherwise lose its first two characters.
+        hex_addr = address[2:] if address.lower().startswith("0x") else address
+        try:
+            int(hex_addr, 16)
+        except ValueError:
+            raise ValueError(
+                f"Cannot read an EVM balance for non-EVM address {address!r}"
+            ) from None
+        call_data = "0x70a08231" + hex_addr.lower().rjust(64, "0")
 
         rpc_url = "https://mainnet.base.org"
         payload = {
             "jsonrpc": "2.0",
             "method": "eth_call",
-            "params": [{"to": usdc_contract, "data": padded_addr}, "latest"],
+            "params": [{"to": usdc_contract, "data": call_data}, "latest"],
             "id": 1,
         }
         resp = requests.post(rpc_url, json=payload, timeout=10)
-        result = resp.json().get("result", "0x0")
-        balance_raw = int(result, 16)
-        return balance_raw / 1_000_000
+        body = resp.json()
+        if body.get("error"):
+            raise APIError(502, f"Base RPC error: {body['error']}", body)
+        result = body.get("result") or "0x0"
+        return int(result, 16) / 1_000_000
+
+    def _query_solana_usdc_balance(self) -> float:
+        """Query USDC balance on Solana mainnet via public RPC.
+
+        Sums every USDC token account owned by the wallet. getTokenAccountsByOwner
+        is used rather than deriving the associated token account, because a wallet
+        can legitimately hold USDC in more than one account.
+        """
+        from .x402_solana import FALLBACK_RPC, USDC_MINT
+
+        payload = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "getTokenAccountsByOwner",
+            "params": [
+                self._auth.address,
+                {"mint": USDC_MINT},
+                {"encoding": "jsonParsed"},
+            ],
+        }
+        resp = requests.post(FALLBACK_RPC, json=payload, timeout=10)
+        body = resp.json()
+        if body.get("error"):
+            raise APIError(502, f"Solana RPC error: {body['error']}", body)
+
+        total = 0.0
+        for acct in (body.get("result") or {}).get("value", []):
+            info = (
+                acct.get("account", {})
+                .get("data", {})
+                .get("parsed", {})
+                .get("info", {})
+            )
+            amount = info.get("tokenAmount", {}).get("uiAmount")
+            if isinstance(amount, (int, float)):
+                total += float(amount)
+        return total
 
     def _track_cost(self, model: str, path: str, usage: dict) -> None:
         """Record request cost to local log file."""

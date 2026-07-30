@@ -24,6 +24,7 @@ from .errors import (
     PaymentError,
     RateLimitError,
 )
+from .embeddings import EmbeddingsClient
 from .image import ImageClient
 from .federation import FederationClient
 from .intent import IntentClient
@@ -31,6 +32,7 @@ from .marketplace import MarketplaceClient
 from .openai_compat import OpenAI
 from .search import SearchClient
 from .types import MusicJob
+from .uapi import UserAPIClient
 from .video import VideoClient
 from .wallet import WalletClient
 
@@ -45,7 +47,9 @@ __all__ = [
     "ImageClient",
     "AudioClient",
     "SearchClient",
+    "EmbeddingsClient",
     "MarketplaceClient",
+    "UserAPIClient",
     "WalletClient",
     "IntentClient",
     "FederationClient",
@@ -58,4 +62,4 @@ __all__ = [
     "InsufficientBalanceError",
     "PaymentError",
 ]
-__version__ = "2.3.0"
+__version__ = "3.0.0"

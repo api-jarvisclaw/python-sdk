@@ -110,130 +110,88 @@ class IntentClient(BaseClient):
         return self._get("/v1/providers")
 
     # ─── Analytics ────────────────────────────────────────────
+    #
+    # The standalone /v1/aip/analytics/* endpoints were removed from the gateway
+    # and consolidated into /api/analytics/aggregate. AIP usage shows up there
+    # with api_source="aip". Scope is enforced server-side from the auth context:
+    # a non-admin caller only ever sees their own rows, so there is no "scope"
+    # parameter to pass.
 
-    def cost_summary(
+    def spend(
         self,
         *,
-        start: int | None = None,
-        end: int | None = None,
-        top_n: int = 10,
-        scope: str = "self",
-    ) -> dict[str, Any]:
-        """Get cost summary for a time range.
+        period: str = "7d",
+        group_by: list[str] | None = None,
+        model: str | None = None,
+        user_id: int | None = None,
+        filters: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Get aggregated spend and settlement rows.
 
         Args:
-            start: Start time as unix timestamp (default: 24h ago)
-            end: End time as unix timestamp (default: now)
-            top_n: Number of top models/providers to include
-            scope: "self" for current user, "global" for admin-level view
+            period: Lookback window — "24h", "7d" (default), "30d" or "90d".
+                Anything else falls back to "7d" server-side.
+            group_by: Aggregation dimensions. Valid values: "day", "model",
+                "api_source", "principal_type", "channel", "group", "client_id".
+                Defaults to ["day", "model", "api_source"].
+            model: Restrict to a single model name.
+            user_id: Widen the scope to another user. Admin-only and ignored
+                otherwise.
+            filters: Exact-match filters keyed by dimension, e.g.
+                {"api_source": "aip", "principal_type": "agent"}.
 
-        Returns dict with: success, data (total_cost, request_count, top_models, etc.)
+        Returns a list of rows, each with the requested dimension keys plus
+        total_quota, total_reqs, total_cost_usd, revenue_usd, settle_done,
+        settle_failed, delivered, undelivered and loss_usd.
         """
-        params: dict[str, Any] = {"top_n": top_n, "scope": scope}
-        if start is not None:
-            params["start"] = start
-        if end is not None:
-            params["end"] = end
-        return self._get("/v1/aip/analytics/summary", params=params)
+        params: dict[str, Any] = {"period": period}
+        if group_by:
+            params["group_by"] = ",".join(group_by)
+        if model is not None:
+            params["model"] = model
+        if user_id is not None:
+            params["user_id"] = user_id
+        for key, value in (filters or {}).items():
+            params[f"filter_{key}"] = value
 
-    def cost_trend(
-        self,
-        *,
-        start: int | None = None,
-        end: int | None = None,
-        granularity: str = "hour",
-        scope: str = "self",
-    ) -> dict[str, Any]:
-        """Get cost trend over time.
+        data = self._get("/api/analytics/aggregate", params=params)
+        if not data.get("success", True):
+            from .errors import APIError
 
-        Args:
-            start: Start time as unix timestamp (default: 24h ago)
-            end: End time as unix timestamp (default: now)
-            granularity: "hour" or "day"
-            scope: "self" for current user, "global" for admin-level view
+            raise APIError(200, data.get("message", "analytics request failed"), data)
+        return data.get("data") or []
 
-        Returns dict with: success, data (list of time-bucketed cost entries)
+    def cost_by_model(self, *, period: str = "7d", **kwargs: Any) -> list[dict[str, Any]]:
+        """Per-model cost and request breakdown for the period."""
+        kwargs.pop("group_by", None)
+        return self.spend(period=period, group_by=["model"], **kwargs)
+
+    def daily_trend(self, *, period: str = "30d", **kwargs: Any) -> list[dict[str, Any]]:
+        """One spend row per calendar day in the period."""
+        kwargs.pop("group_by", None)
+        return self.spend(period=period, group_by=["day"], **kwargs)
+
+    def quality(self, *, period: str = "7d", model: str | None = None) -> dict[str, Any]:
+        """Get per-request quality signals mined from the logs.
+
+        Keyed by (model, principal). The signal set evolves with what the gateway
+        mines, so the payload is returned as-is.
         """
-        params: dict[str, Any] = {"granularity": granularity, "scope": scope}
-        if start is not None:
-            params["start"] = start
-        if end is not None:
-            params["end"] = end
-        return self._get("/v1/aip/analytics/trend", params=params)
+        params: dict[str, Any] = {"period": period}
+        if model is not None:
+            params["model"] = model
+        return self._get("/api/analytics/quality", params=params)
 
-    def budget_status(
-        self,
-        *,
-        daily_budget: float = 10.0,
-        monthly_budget: float = 200.0,
-        scope: str = "self",
-    ) -> dict[str, Any]:
-        """Get current budget utilization status.
+    def insights(self, *, period: str = "7d", model: str | None = None) -> dict[str, Any]:
+        """Get the deep-scan summary over consume and marketplace logs.
 
-        Args:
-            daily_budget: Daily budget limit in USD
-            monthly_budget: Monthly budget limit in USD
-            scope: "self" for current user, "global" for admin-level view
-
-        Returns dict with: success, data (daily_spent, monthly_spent, remaining, alerts)
+        Folds cache, latency, reliability, pricing and mapping signals into a
+        global summary plus a per-(model, principal) breakdown.
         """
-        params: dict[str, Any] = {
-            "daily_budget": daily_budget,
-            "monthly_budget": monthly_budget,
-            "scope": scope,
-        }
-        return self._get("/v1/aip/analytics/budget", params=params)
-
-    def model_breakdown(
-        self,
-        *,
-        start: int | None = None,
-        end: int | None = None,
-        top_n: int = 10,
-        scope: str = "self",
-    ) -> dict[str, Any]:
-        """Get per-model usage breakdown.
-
-        Args:
-            start: Start time as unix timestamp (default: 24h ago)
-            end: End time as unix timestamp (default: now)
-            top_n: Number of top models to return
-            scope: "self" for current user, "global" for admin-level view
-
-        Returns dict with: success, data (list of model entries with tokens, cost, requests)
-        """
-        params: dict[str, Any] = {"top_n": top_n, "scope": scope}
-        if start is not None:
-            params["start"] = start
-        if end is not None:
-            params["end"] = end
-        return self._get("/v1/aip/analytics/models", params=params)
-
-    def roi(
-        self,
-        *,
-        start: int | None = None,
-        end: int | None = None,
-        top_n: int = 10,
-        scope: str = "self",
-    ) -> dict[str, Any]:
-        """Get ROI (tokens-per-dollar) efficiency metrics per model.
-
-        Args:
-            start: Start time as unix timestamp (default: 24h ago)
-            end: End time as unix timestamp (default: now)
-            top_n: Number of top models to return
-            scope: "self" for current user, "global" for admin-level view
-
-        Returns dict with: success, data (list of model ROI entries with
-            model_name, total_tokens, cost_usd, tokens_per_dollar)
-        """
-        params: dict[str, Any] = {"top_n": top_n, "scope": scope}
-        if start is not None:
-            params["start"] = start
-        if end is not None:
-            params["end"] = end
-        return self._get("/v1/aip/analytics/roi", params=params)
+        params: dict[str, Any] = {"period": period}
+        if model is not None:
+            params["model"] = model
+        return self._get("/api/analytics/insights", params=params)
 
 
     # ─── Discovery & Subscription ─────────────────────────────────────────────────
@@ -241,84 +199,184 @@ class IntentClient(BaseClient):
     def discover(
         self,
         *,
-        intent_type: str | None = None,
-        protocol: str | None = None,
-        min_uptime: float | None = None,
+        intent: str | None = None,
+        features: list[str] | None = None,
+        max_price: float | None = None,
+        public: bool = False,
     ) -> dict[str, Any]:
-        """Discover AIP-compatible platforms via federation.
+        """Discover the intents and providers this gateway and its peers serve.
 
         Args:
-            intent_type: Filter by supported intent type
-            protocol: Filter by protocol ("aip", "a2a", "mcp")
-            min_uptime: Minimum uptime percentage (0-100)
+            intent: Restrict to one intent type. Omit for everything.
+            features: Require providers to support ALL of these features.
+            max_price: Cap the estimated per-request price in USD.
+            public: Use the free unauthenticated GET route instead of the paid
+                POST one. Same response shape.
 
-        Returns dict with: intents (list of discovered capabilities)
+        Returns dict with: intents, providers, federated, total.
+        Note `total` counts providers only.
         """
+        if public:
+            params: dict[str, Any] = {}
+            if intent is not None:
+                params["intent"] = intent
+            if features:
+                params["features"] = ",".join(features)
+            if max_price is not None:
+                params["max_price"] = max_price
+            return self._get("/v1/intent/discover", params=params)
+
         body: dict[str, Any] = {}
-        if intent_type is not None:
-            body["intent_type"] = intent_type
-        if protocol is not None:
-            body["protocol"] = protocol
-        if min_uptime is not None:
-            body["min_uptime"] = min_uptime
+        if intent is not None:
+            body["intent"] = intent
+        if features:
+            body["features"] = features
+        if max_price is not None:
+            body["max_price"] = max_price
         return self._post("/v1/intent/discover", json=body)
+
+    def resolve_natural(
+        self,
+        query: str,
+        *,
+        session_id: str | None = None,
+        constraints: dict[str, Any] | None = None,
+        preferences: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Resolve a free-text request to an intent and ranked providers.
+
+        Uses embedding similarity with a keyword fallback. Nothing is executed,
+        so no provider is charged — but the embedding itself is billable.
+
+        Args:
+            query: The natural-language request.
+            session_id: Carry a multi-turn clarification forward. Pass back the
+                session_id from a previous "clarify" response.
+            constraints: Optional max_price_usd / max_latency_ms / features.
+            preferences: Optional optimize_for ("cost", "quality", "latency").
+
+        Returns dict with: status ("resolved" | "clarify" | "budget_insufficient"
+        | "no_match"), session_id, intent, confidence, matches, clarify, message.
+        On "clarify", ask clarify["question"] and retry with the same session_id.
+        """
+        if not query or not query.strip():
+            raise ValueError("query is required")
+        body: dict[str, Any] = {"query": query}
+        if session_id is not None:
+            body["session_id"] = session_id
+        if constraints is not None:
+            body["constraints"] = constraints
+        if preferences is not None:
+            body["preferences"] = preferences
+        return self._post("/v1/intent/resolve/natural", json=body)
+
+    def network_stats(self) -> dict[str, Any]:
+        """Get provider and federation counts. Public, no auth required.
+
+        Returns dict with: success, data (total_providers, by_source,
+        intent_types as a count, and federation counts when available).
+        """
+        return self._get("/v1/network/stats")
 
     def subscribe(
         self,
         intent: str,
         payload: dict[str, Any],
         *,
-        budget: dict[str, Any] | None = None,
         constraints: dict[str, Any] | None = None,
+        preferences: dict[str, Any] | None = None,
+        optimize_for: str | None = None,
         stream: bool = True,
     ):
-        """Subscribe to an intent with streaming execution.
+        """Execute an intent with the response streamed back over SSE.
 
-        This is the streaming variant of execute() — the server resolves
-        the best provider and streams the response back via SSE.
+        This is the streaming variant of execute(): the server resolves the best
+        provider, injects stream=true and the resolved model into your payload,
+        and relays the upstream events.
 
         Args:
-            intent: Intent type (e.g. "chat_completion", "web_search")
-            payload: The request payload (model, messages, etc.)
-            budget: Optional budget constraints
-            constraints: Optional routing constraints
-            stream: Whether to stream (default True)
+            intent: Intent type (e.g. "chat_completion", "web_search").
+            payload: The provider request body (messages, prompt, …). Required.
+            constraints: Optional routing constraints.
+            preferences: Optional optimization preferences.
+            optimize_for: Shorthand for preferences["optimize_for"], using the
+                subscribe vocabulary: "speed", "cost" or "quality".
+            stream: Parse the response as SSE (default). Set False to get the
+                raw JSON body, which is only useful for error responses — the
+                endpoint always streams on success.
 
         Returns:
-            If stream=True: generator yielding SSE event dicts with 'event' and 'data' keys
-            If stream=False: dict with the final JSON response
+            stream=True: a generator of {"event": str, "data": Any} dicts. The
+                first event is "metadata" and the last is "done". `data` is
+                parsed JSON where possible, and the raw string otherwise — note
+                OpenAI-style streams end with the literal "[DONE]" sentinel.
+            stream=False: the decoded JSON body.
+
+        Note there is no budget parameter: this endpoint takes constraints and
+        preferences only. Use execute_budget() for a hard spend cap.
         """
+        if not payload:
+            raise ValueError("payload is required")
         body: dict[str, Any] = {"intent": intent, "payload": payload}
-        if budget is not None:
-            body["budget"] = budget
         if constraints is not None:
             body["constraints"] = constraints
+        if preferences is not None:
+            body["preferences"] = preferences
+        if optimize_for is not None:
+            body["optimize_for"] = optimize_for
         if stream:
-            body["stream"] = True
             resp = self._post_raw("/v1/intent/subscribe", json=body, stream=True)
             return self._iter_sse(resp)
         return self._post("/v1/intent/subscribe", json=body)
 
     @staticmethod
     def _iter_sse(resp):
-        """Parse Server-Sent Events from a streaming response."""
+        """Parse Server-Sent Events from a streaming response.
+
+        Follows the SSE framing rules rather than assuming one shape: the field
+        separator is "field:" with at most one optional leading space, and
+        repeated data: lines in one event are joined with newlines. Matching on
+        "data: " with a hard-coded space silently drops any upstream that writes
+        "data:{...}".
+        """
         import json as _json
+
         event_type = None
+        data_lines: list[str] = []
+
+        def _emit():
+            raw = "\n".join(data_lines)
+            try:
+                data = _json.loads(raw)
+            except (ValueError, TypeError):
+                data = raw
+            return {"event": event_type or "message", "data": data}
+
         for line in resp.iter_lines(decode_unicode=True):
             if line is None:
                 continue
-            if line.startswith("event:"):
-                event_type = line[6:].strip()
-            elif line.startswith("data:"):
-                data_str = line[5:].strip()
-                try:
-                    data = _json.loads(data_str)
-                except (ValueError, TypeError):
-                    data = data_str
-                yield {"event": event_type or "message", "data": data}
-                event_type = None
-            elif line == "":
+            line = line.rstrip("\r")
+            if line == "":
+                if event_type is not None or data_lines:
+                    yield _emit()
+                    event_type = None
+                    data_lines = []
                 continue
+            if line.startswith(":"):
+                continue  # comment / keep-alive
+            name, sep, value = line.partition(":")
+            if not sep:
+                continue
+            if value.startswith(" "):
+                value = value[1:]
+            if name == "event":
+                event_type = value
+            elif name == "data":
+                data_lines.append(value)
+
+        # Flush a trailing event the stream ended without a blank line after.
+        if event_type is not None or data_lines:
+            yield _emit()
 
     def unsubscribe(self, subscription_id: str) -> dict[str, Any]:
         """Cancel an intent subscription.

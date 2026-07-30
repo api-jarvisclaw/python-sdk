@@ -485,11 +485,21 @@ class Agent(BaseClient):
     # ═══════════════════════════════════════════════════════════════════
 
     def balance(self) -> dict:
-        """Get wallet balance (quota + HD wallet + subscription)."""
+        """Get the HD wallet's on-chain USDC balance (Base + Solana).
+
+        Returns dict with balance_usd and wallets.{base,solana}.{usdc,address}.
+        Account quota is deliberately excluded — x402 settles against the wallet
+        and never debits quota.
+        """
         return self._request("GET", "/v1/wallet/balance")
 
     def history(self, page: int = 1, page_size: int = 20, category: str | None = None) -> dict:
-        """Get transaction history."""
+        """Get transaction history.
+
+        Note: `category` is sent but the server does not filter on it — the
+        handler passes no category through to the query. Filter client-side on
+        each transaction's "category" field if you need it.
+        """
         params: dict[str, Any] = {"page": page, "page_size": page_size}
         if category:
             params["category"] = category
@@ -501,16 +511,25 @@ class Agent(BaseClient):
 
     def set_limits(self, *, daily_max_usd: float | None = None,
                    per_request_max_usd: float | None = None,
-                   monthly_max_usd: float | None = None) -> dict:
-        """Update spending limits."""
-        payload = {}
+                   monthly_max_usd: float | None = None,
+                   auto_pause_below_usd: float | None = None) -> dict:
+        """Update spending limits, preserving the ones not named.
+
+        The endpoint replaces the whole record (the server persists it with a
+        full-row write), so this reads the current limits first and merges the
+        changes in. Passing one argument used to zero the others.
+        """
+        current = dict(self.spending_limits())
+        current.pop("updated_at", None)
         if daily_max_usd is not None:
-            payload["daily_max_usd"] = daily_max_usd
+            current["daily_max_usd"] = daily_max_usd
         if per_request_max_usd is not None:
-            payload["per_request_max_usd"] = per_request_max_usd
+            current["per_request_max_usd"] = per_request_max_usd
         if monthly_max_usd is not None:
-            payload["monthly_max_usd"] = monthly_max_usd
-        return self._request("PUT", "/v1/wallet/limits", json=payload)
+            current["monthly_max_usd"] = monthly_max_usd
+        if auto_pause_below_usd is not None:
+            current["auto_pause_below_usd"] = auto_pause_below_usd
+        return self._request("PUT", "/v1/wallet/limits", json=current)
 
     # ═══════════════════════════════════════════════════════════════════
     # Providers
