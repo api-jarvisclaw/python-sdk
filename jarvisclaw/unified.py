@@ -204,8 +204,12 @@ class JarvisClaw(BaseClient):
                     continue
                 chunk = event["data"]
                 if isinstance(chunk, dict):
-                    delta = chunk.get("choices", [{}])[0].get("delta", {})
-                    print(delta.get("content", ""), end="", flush=True)
+                    # The last chunk of a usage-reporting stream has an empty
+                    # choices array, so guard before indexing.
+                    choices = chunk.get("choices") or []
+                    if choices:
+                        delta = choices[0].get("delta") or {}
+                        print(delta.get("content", ""), end="", flush=True)
         """
         if not payload:
             raise ValueError("payload is required")
@@ -463,8 +467,15 @@ class JarvisClaw(BaseClient):
         return self._post("/v1/intent/resolve/natural", json=body)
 
     def network_stats(self) -> dict[str, Any]:
-        """Get provider and federation counts. Public, no auth required."""
-        return self._get("/v1/network/stats")
+        """Get provider and federation counts. Public, no auth required.
+
+        Returns total_providers, by_source, intent_types (a count) and
+        federation counts. The {"success", "data"} envelope is unwrapped.
+        """
+        resp = self._get("/v1/network/stats")
+        if isinstance(resp, dict) and "data" in resp:
+            return resp["data"]
+        return resp
 
     def discover_peers(self, *, page: int = 1, page_size: int = 20) -> dict[str, Any]:
         """List federation peers from the public registry.

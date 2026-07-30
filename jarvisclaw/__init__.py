@@ -19,10 +19,12 @@ from .prompt_coach import PromptCoachClient
 from .errors import (
     APIError,
     AuthenticationError,
+    ConnectionError,
     InsufficientBalanceError,
     JarvisClawError,
     PaymentError,
     RateLimitError,
+    TimeoutError,
 )
 from .embeddings import EmbeddingsClient
 from .image import ImageClient
@@ -61,5 +63,7 @@ __all__ = [
     "RateLimitError",
     "InsufficientBalanceError",
     "PaymentError",
+    "ConnectionError",
+    "TimeoutError",
 ]
-__version__ = "3.0.1"
+__version__ = "3.1.0"

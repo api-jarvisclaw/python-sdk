@@ -16,6 +16,7 @@ from .errors import (
     InsufficientBalanceError,
     RateLimitError,
 )
+from .types import Model
 
 DEFAULT_BASE_URL = "https://api.jarvisclaw.ai"
 
@@ -49,7 +50,7 @@ class BaseClient:
         if api_key:
             self._auth: AuthStrategy = APIKeyAuth(api_key)
         elif private_key:
-            from .auth import detect_key_type, SolanaX402Auth
+            from .auth import SolanaX402Auth, detect_key_type
             key_type = network or detect_key_type(private_key)
             if key_type == "solana":
                 determined_base = (
@@ -66,7 +67,7 @@ class BaseClient:
             if env_key:
                 self._auth = APIKeyAuth(env_key)
             elif env_pk:
-                from .auth import detect_key_type, SolanaX402Auth
+                from .auth import SolanaX402Auth, detect_key_type
                 key_type = detect_key_type(env_pk)
                 if key_type == "solana":
                     determined_base = (
@@ -128,6 +129,25 @@ class BaseClient:
         """Total estimated USD spent in this session (approximate, uses flat rate)."""
         return self._total_spent
 
+    def list_models(self) -> list[Model]:
+        """List the models this gateway serves.
+
+        Available on every client, since knowing what you can pass as `model` is
+        useful regardless of which capability you are using. Worth checking
+        before assuming a model exists: a gateway that has no channel for one
+        answers 503 rather than falling back.
+        """
+        data = self._get("/v1/models")
+        items = data.get("data") if isinstance(data, dict) else data
+        return [
+            Model(
+                id=m.get("id", ""),
+                object=m.get("object", "model"),
+                owned_by=m.get("owned_by", ""),
+            )
+            for m in (items or [])
+        ]
+
     # ─── Internal HTTP ──────────────────────────────────────
 
     def _get(self, path: str, **kwargs) -> Any:
@@ -150,9 +170,25 @@ class BaseClient:
         return resp.json()
 
     def _do_request(self, method: str, url: str, stream: bool, **kwargs) -> requests.Response:
-        """Thread-safe session request (protects against concurrent MusicJob threads)."""
-        with self._session_lock:
-            return self._session.request(method, url, stream=stream, **kwargs)
+        """Thread-safe session request (protects against concurrent MusicJob threads).
+
+        Transport failures are translated into SDK exceptions so that callers can
+        catch every failure mode through JarvisClawError instead of also having to
+        know about `requests`.
+        """
+        try:
+            with self._session_lock:
+                return self._session.request(method, url, stream=stream, **kwargs)
+        except requests.exceptions.Timeout as e:
+            from .errors import TimeoutError as JCTimeoutError
+
+            raise JCTimeoutError(
+                f"request to {url} timed out after {kwargs.get('timeout')}s", e
+            ) from e
+        except requests.exceptions.RequestException as e:
+            from .errors import ConnectionError as JCConnectionError
+
+            raise JCConnectionError(f"request to {url} failed: {e}", e) from e
 
     def _request_raw(self, method: str, path: str, **kwargs) -> requests.Response:
         url = self.base_url + path

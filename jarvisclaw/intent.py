@@ -273,10 +273,17 @@ class IntentClient(BaseClient):
     def network_stats(self) -> dict[str, Any]:
         """Get provider and federation counts. Public, no auth required.
 
-        Returns dict with: success, data (total_providers, by_source,
-        intent_types as a count, and federation counts when available).
+        Returns dict with: total_providers, by_source ({internal, federation}),
+        intent_types (a count, not a list), and federation ({servers,
+        healthy_servers, resources}) when a federation is configured.
+
+        The handler wraps this in {"success": ..., "data": ...}; the envelope is
+        unwrapped here so callers get the stats directly, matching the Go SDK.
         """
-        return self._get("/v1/network/stats")
+        resp = self._get("/v1/network/stats")
+        if isinstance(resp, dict) and "data" in resp:
+            return resp["data"]
+        return resp
 
     def subscribe(
         self,

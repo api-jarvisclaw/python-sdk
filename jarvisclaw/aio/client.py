@@ -97,6 +97,26 @@ class AsyncBaseClient:
         resp = await self._request_raw(method, path, **kwargs)
         return resp.json()
 
+    async def _send(self, method: str, url: str, **kwargs) -> httpx.Response:
+        """Send a request, translating transport failures into SDK exceptions.
+
+        Mirrors the sync client: without this, timeouts and connection errors
+        would surface as raw httpx exceptions, so callers could not catch every
+        failure through JarvisClawError.
+        """
+        try:
+            return await self._client.request(method, url, **kwargs)
+        except httpx.TimeoutException as e:
+            from ..errors import TimeoutError as JCTimeoutError
+
+            raise JCTimeoutError(
+                f"request to {url} timed out after {kwargs.get('timeout')}s", e
+            ) from e
+        except httpx.HTTPError as e:
+            from ..errors import ConnectionError as JCConnectionError
+
+            raise JCConnectionError(f"request to {url} failed: {e}", e) from e
+
     async def _request_raw(self, method: str, path: str, **kwargs) -> httpx.Response:
         url = self.base_url + path
         headers = kwargs.pop("headers", {}) or {}
@@ -111,7 +131,7 @@ class AsyncBaseClient:
                 from ..auth import _rewind_files
                 _rewind_files(kwargs)
 
-            resp = await self._client.request(method, url, timeout=req_timeout, **kwargs)
+            resp = await self._send(method, url, timeout=req_timeout, **kwargs)
 
             if resp.status_code == 402:
                 retry_resp = await self._handle_402(resp, method, url, req_timeout, **kwargs)
@@ -180,7 +200,7 @@ class AsyncBaseClient:
         headers = kwargs.pop("headers", {}) or {}
         headers["PAYMENT-SIGNATURE"] = signature
         _rewind_files(kwargs)
-        return await self._client.request(method, url, headers=headers, timeout=req_timeout, **kwargs)
+        return await self._send(method, url, headers=headers, timeout=req_timeout, **kwargs)
 
     def _raise_for_stream_status(self, resp) -> None:
         """Raise the typed error for an already-read streaming response.
@@ -222,8 +242,17 @@ class AsyncBaseClient:
 class AsyncChatClient(AsyncBaseClient):
     """Async chat completions."""
 
-    async def complete(self, message: str, *, model: str | None = None, system: str | None = None, temperature: float = 0.7) -> str:
-        resp = await self.completion(self._build_messages(message, system), model=model, temperature=temperature)
+    async def complete(self, message: str, *, model: str | None = None, system: str | None = None, temperature: float = 0.7, **kwargs) -> str:
+        """Simple chat — returns response text directly.
+
+        **kwargs forwards extra API params such as max_tokens. Capping
+        max_tokens matters on a low balance: the gateway reserves against the
+        model's full output allowance up front.
+        """
+        resp = await self.completion(
+            self._build_messages(message, system), model=model,
+            temperature=temperature, **kwargs,
+        )
         return resp.content
 
     async def completion(self, messages: list[dict], *, model: str | None = None, **kwargs) -> ChatResponse:
@@ -863,5 +892,12 @@ class AsyncIntentClient(AsyncBaseClient):
         return await self._request("DELETE", f"/v1/intent/subscribe/{subscription_id}")
 
     async def network_stats(self) -> dict[str, Any]:
-        """Get provider and federation counts. Public, no auth required."""
-        return await self._get("/v1/network/stats")
+        """Get provider and federation counts. Public, no auth required.
+
+        Returns total_providers, by_source, intent_types (a count) and
+        federation counts. The {"success", "data"} envelope is unwrapped.
+        """
+        resp = await self._get("/v1/network/stats")
+        if isinstance(resp, dict) and "data" in resp:
+            return resp["data"]
+        return resp
