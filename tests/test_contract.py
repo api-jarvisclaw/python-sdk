@@ -17,11 +17,15 @@ from typing import Any
 import pytest
 
 from jarvisclaw import (
+    Agent,
     APIError,
+    BudgetExceededError,
+    ChatClient,
     EmbeddingsClient,
     FederationClient,
     IntentClient,
     JarvisClaw,
+    JarvisClawError,
     PromptCoachClient,
     SearchClient,
     UserAPIClient,
@@ -281,8 +285,21 @@ def test_network_stats(stub):
     result = make(IntentClient).network_stats()
 
     assert rec.path == "/v1/network/stats"
+    # The {success, data} envelope is unwrapped, matching the Go SDK, so the
+    # stats are at the top level rather than under "data".
+    assert "data" not in result
+    assert result["total_providers"] == 42
     # intent_types is a count, not a list.
-    assert result["data"]["intent_types"] == 13
+    assert result["intent_types"] == 13
+
+
+def test_network_stats_tolerates_unwrapped_body(stub):
+    """A response already lacking the envelope must pass through untouched."""
+    make, rec, respond = stub
+    respond({"total_providers": 7, "intent_types": 2})
+    result = make(IntentClient).network_stats()
+
+    assert result["total_providers"] == 7
 
 
 def test_subscribe_requires_payload(stub):
@@ -569,3 +586,83 @@ def test_get_balance_reads_hard_limit(stub):
     assert make(WalletClient).get_balance() == 5.96
     # Not /api/user/self, which needs a dashboard session an API key cannot give.
     assert rec.path == "/v1/dashboard/billing/subscription"
+
+
+# ── Regressions found by running the examples against the live gateway ────────
+
+
+def test_agent_stream_survives_empty_choices(stub):
+    """A usage-reporting stream ends with choices:[] — indexing it used to crash.
+
+    The gateway's final SSE frame carries token usage and an empty choices array.
+    Agent.stream() read choices[0] unconditionally, so every fully-consumed
+    stream raised IndexError after yielding all its content.
+    """
+    make, _rec, respond = stub
+    respond(
+        'data: {"choices":[{"delta":{"content":"hel"}}]}\n\n'
+        'data: {"choices":[{"delta":{"content":"lo"}}]}\n\n'
+        'data: {"choices":[],"usage":{"total_tokens":7}}\n\n'
+        "data: [DONE]\n\n",
+        content_type="text/event-stream",
+    )
+    agent = make(Agent, default_model="openai/gpt-4o-mini")
+
+    assert "".join(agent.stream("hi")) == "hello"
+
+
+def test_agent_stream_accepts_spaceless_sse_field(stub):
+    """The space after "data:" is optional per the SSE spec."""
+    make, _rec, respond = stub
+    respond(
+        'data:{"choices":[{"delta":{"content":"ok"}}]}\n\n'
+        ": this is a comment line and must be ignored\n\n"
+        "data:[DONE]\n\n",
+        content_type="text/event-stream",
+    )
+    agent = make(Agent, default_model="openai/gpt-4o-mini")
+
+    assert "".join(agent.stream("hi")) == "ok"
+
+
+def test_agent_ask_rejects_nonpositive_budget(stub):
+    """ask(budget=...) used to be recorded after the fact and never enforced.
+
+    Cost is only known from the response, so a budget that cannot cover any call
+    has to be refused before the request is sent.
+    """
+    make, rec, respond = stub
+    respond({"choices": [{"message": {"content": "hi"}}]})
+    agent = make(Agent, default_model="openai/gpt-4o-mini")
+
+    with pytest.raises(BudgetExceededError):
+        agent.ask("hello", budget=0)
+
+    # Nothing was sent.
+    assert rec.path == ""
+
+
+def test_transport_timeout_raises_sdk_error():
+    """Transport failures must be catchable as JarvisClawError.
+
+    They previously escaped as raw requests exceptions, so a caller could not
+    write one except clause covering all SDK failures.
+    """
+    # 10.255.255.1 is non-routable, so this cannot reach a real service.
+    client = ChatClient(api_key="sk-test", base_url="http://10.255.255.1", timeout=1)
+
+    with pytest.raises(JarvisClawError) as exc:
+        client.complete("hi")
+    assert exc.value.is_timeout
+
+
+def test_chat_complete_forwards_extra_params(stub):
+    """complete() had no **kwargs, so max_tokens and friends were unreachable."""
+    make, rec, respond = stub
+    respond({"choices": [{"message": {"content": "ok"}}]})
+
+    make(ChatClient).complete("hi", model="openai/gpt-4o-mini", max_tokens=5, seed=1)
+
+    body = rec.json_body
+    assert body["max_tokens"] == 5
+    assert body["seed"] == 1

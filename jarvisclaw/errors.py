@@ -38,3 +38,28 @@ class InsufficientBalanceError(APIError):
 class PaymentError(JarvisClawError):
     """x402 payment signing or settlement failed."""
     pass
+
+
+class ConnectionError(JarvisClawError):
+    """The request never produced an HTTP response.
+
+    Covers timeouts, DNS failures, refused connections and dropped sockets.
+    Without this, transport failures would surface as raw `requests` exceptions,
+    so callers could not catch every SDK failure via JarvisClawError.
+
+    `cause` holds the underlying exception, and `is_timeout` distinguishes a
+    timeout — usually worth retrying — from a hard connection failure.
+    """
+
+    def __init__(self, message: str, cause: BaseException | None = None,
+                 *, is_timeout: bool = False):
+        self.cause = cause
+        self.is_timeout = is_timeout
+        super().__init__(message)
+
+
+class TimeoutError(ConnectionError):
+    """The request exceeded the client timeout before a response arrived."""
+
+    def __init__(self, message: str, cause: BaseException | None = None):
+        super().__init__(message, cause, is_timeout=True)

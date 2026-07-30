@@ -8,6 +8,37 @@ The official Python SDK for [JarvisClaw AI](https://jarvisclaw.ai) — intent-ba
 pip install jarvisclaw
 ```
 
+## Examples
+
+Eleven runnable scripts under [examples/](examples/), each executed against the
+live gateway — so the field names in them reflect what the server actually
+returns:
+
+```bash
+export JARVISCLAW_API_KEY=sk-...
+python examples/01_chat.py
+```
+
+Covering chat, agents, wallet, intents, embeddings, search, images, OpenAI
+compatibility, marketplace, async, and the unified client.
+
+## Two billing paths
+
+Worth knowing before your first call, because it explains a class of confusing
+failures:
+
+- **Account quota** — you name a model explicitly (`model="openai/gpt-4o-mini"`).
+- **x402 on-chain USDC** — anything routed through `auto/*` (smart routing,
+  `auto/search`) plus every marketplace service, settled against your HD wallet.
+
+The second path needs USDC in the wallet *even with API-key auth*. Without it you
+get `payment settlement failed` after a slow retry, or a 403 `insufficient HD
+wallet balance` — not an obvious "out of funds" message.
+
+Capping `max_tokens` is also worth the keystrokes on a low balance: the gateway
+reserves against the model's full output allowance before the call, so an
+uncapped request can be refused even when the reply would have been cheap.
+
 ## Quick Start
 
 ```python
@@ -359,6 +390,38 @@ print(message.content[0].text)
 | `JARVISCLAW_API_KEY` | API key authentication |
 | `JARVISCLAW_WALLET_KEY` | x402 private key (EVM or Solana) |
 | `JARVISCLAW_BASE_URL` | Custom endpoint (default: `https://api.jarvisclaw.ai`) |
+
+## What's new in 3.1.0
+
+Mostly additive. The one behaviour change is `network_stats()` — see below.
+
+**Fixed:** `Agent.stream()` crashed with `IndexError` after yielding all its
+content. The gateway's final SSE frame reports token usage with an empty
+`choices` array, which the code indexed unconditionally. It also required a space
+after `data:`, which the SSE spec makes optional.
+
+**Fixed:** `Agent.ask(budget=...)` never enforced the budget. Cost was recorded
+after the response arrived, so `BudgetExceededError` could not fire. A budget
+that cannot cover any call is now refused before the request goes out, and an
+overspend raises rather than returning quietly.
+
+**Fixed:** transport failures escaped as raw `requests`/`httpx` exceptions, so
+you could not catch every SDK failure through `JarvisClawError`. Timeouts and
+connection errors are now `TimeoutError` and `ConnectionError` (both SDK types,
+exported), each carrying `.cause` and `.is_timeout`.
+
+**Fixed:** `ChatClient.complete()` had no `**kwargs`, so `max_tokens` and friends
+were unreachable — you had to drop to `completion()`. Same for the async client.
+
+**Changed:** `network_stats()` now unwraps the `{"success", "data"}` envelope and
+returns the stats directly, matching the Go SDK. If you were reading
+`result["data"]["total_providers"]`, drop the `["data"]`.
+
+**Added:** `list_models()` on every client. The `Model` type existed but nothing
+populated it.
+
+**Added:** eleven runnable [examples/](examples/), and a README section on the two
+billing paths.
 
 ## Migration to v3
 

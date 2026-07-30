@@ -15,12 +15,11 @@ from __future__ import annotations
 
 import inspect
 import json
-import os
 import time
 from dataclasses import dataclass, field
-from typing import Any, Callable, Generator, Optional
+from typing import Any, Callable, Generator
 
-from ._base import BaseClient, DEFAULT_BASE_URL
+from ._base import BaseClient
 
 
 @dataclass
@@ -249,6 +248,12 @@ class Agent(BaseClient):
         if resolved_model is None:
             resolved_model = self._resolve_model("chat_completion", effective_budget, optimize)
 
+        # Budget guard. This has to happen before the request goes out: cost is
+        # only known from the response, so checking afterwards would report an
+        # overspend that already happened instead of preventing it.
+        if effective_budget <= 0:
+            raise BudgetExceededError(effective_budget, 0.0)
+
         payload = {
             "model": resolved_model,
             "messages": [{"role": "user", "content": prompt}],
@@ -261,6 +266,12 @@ class Agent(BaseClient):
         cost = self._estimate_cost(resp, resolved_model)
         tracker.record(cost, resolved_model)
         self._session_cost.record(cost, resolved_model)
+
+        # The call is already settled, so this cannot un-spend it — but a caller
+        # that set a budget needs to know it was breached rather than reading a
+        # result that quietly cost more than allowed.
+        if tracker.over_budget:
+            raise BudgetExceededError(tracker.budget_usd, tracker.spent_usd)
 
         return text
 
@@ -436,19 +447,27 @@ class Agent(BaseClient):
 
         resp = self._post_raw("/v1/chat/completions", json=payload, stream=True)
         for line in resp.iter_lines(decode_unicode=True):
-            if not line or not line.startswith("data: "):
+            if not line:
                 continue
-            data_str = line[6:]
+            # Per the SSE spec the space after "data:" is optional, and a line
+            # starting with ":" is a comment to be ignored.
+            if line.startswith(":") or not line.startswith("data:"):
+                continue
+            data_str = line[5:].lstrip(" ")
             if data_str.strip() == "[DONE]":
                 break
             try:
                 chunk = json.loads(data_str)
-                delta = chunk.get("choices", [{}])[0].get("delta", {})
-                content = delta.get("content", "")
-                if content:
-                    yield content
             except json.JSONDecodeError:
                 continue
+            # The final chunk of a usage-reporting stream carries an empty
+            # choices array, so this cannot assume index 0 exists.
+            choices = chunk.get("choices") or []
+            if not choices:
+                continue
+            content = (choices[0].get("delta") or {}).get("content") or ""
+            if content:
+                yield content
 
     # ═══════════════════════════════════════════════════════════════════
     # Intent Resolution

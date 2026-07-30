@@ -25,6 +25,7 @@ class ChatClient(BaseClient):
         model: str | None = None,
         system: str | None = None,
         temperature: float = 0.7,
+        **kwargs: Any,
     ) -> str:
         """Simple chat — returns response text directly.
 
@@ -33,13 +34,21 @@ class ChatClient(BaseClient):
             model: Model identifier. Defaults to "auto" (smart routing).
             system: Optional system prompt.
             temperature: Sampling temperature (0.0 - 2.0).
+            **kwargs: Additional params forwarded to the API, e.g.
+                max_tokens, top_p, stop, seed.
+
+        Capping max_tokens is worth doing on a low balance: the gateway reserves
+        against the model's full output allowance up front, so an uncapped
+        request can be refused even when the actual reply would be cheap.
         """
         model = model or "auto"
         messages: list[dict[str, str]] = []
         if system:
             messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": message})
-        resp = self.completion(messages, model=model, temperature=temperature)
+        resp = self.completion(
+            messages, model=model, temperature=temperature, **kwargs
+        )
         return resp.content
 
     def completion(
@@ -101,6 +110,7 @@ class ChatClient(BaseClient):
             model: Model identifier. Defaults to "auto".
             system: Optional system prompt.
             temperature: Sampling temperature.
+            **kwargs: Additional params forwarded to the API, e.g. max_tokens.
         """
         model = model or "auto"
         messages: list[dict[str, str]] = []
