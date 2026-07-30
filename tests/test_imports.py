@@ -81,3 +81,41 @@ def test_async_clients_import():
 
     for name in aio.__all__:
         assert hasattr(aio, name), f"{name} is in aio.__all__ but not importable"
+
+
+def test_version_matches_pyproject():
+    """pyproject.toml and __version__ must agree.
+
+    They drifted once: 3.1.0 was set in __init__.py but not pyproject.toml, so
+    the release workflow built a 3.0.1 wheel and PyPI rejected it as a duplicate
+    version. The tag was already pushed by then, which is the expensive part —
+    nothing before the upload attempt noticed.
+    """
+    import re
+    import sys
+    from pathlib import Path
+
+    if sys.version_info >= (3, 11):
+        import tomllib
+    else:
+        import pytest
+
+        tomllib = pytest.importorskip("tomli", reason="needs tomllib or tomli")
+
+    root = Path(__file__).resolve().parent.parent
+    pyproject_version = tomllib.loads(
+        (root / "pyproject.toml").read_text(encoding="utf-8")
+    )["project"]["version"]
+
+    init_src = (root / "jarvisclaw" / "__init__.py").read_text(encoding="utf-8")
+    match = re.search(r'__version__\s*=\s*"([^"]+)"', init_src)
+    assert match, "__version__ not found in jarvisclaw/__init__.py"
+
+    assert match.group(1) == pyproject_version, (
+        f"__version__ is {match.group(1)} but pyproject.toml says "
+        f"{pyproject_version}; the built wheel would carry the pyproject value"
+    )
+
+    import jarvisclaw
+
+    assert jarvisclaw.__version__ == pyproject_version
