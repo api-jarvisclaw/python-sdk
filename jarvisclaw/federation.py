@@ -41,11 +41,13 @@ class FederationClient(BaseClient):
             category: Exact category match.
             limit: Max results (default 20).
 
-        Returns a list of resources, each with: name, path, method, description,
-        category, tags, price_input, price_output, sell_price, price_unit,
-        currency, network, popular, call_count, server_name, updated_at.
+        Returns a list of resources, each with: resource_id, name, path, method,
+        description, category, tags, price_input, price_output, sell_price,
+        price_unit, currency, network, popular, call_count, server_name,
+        updated_at.
 
-        sell_price is what this gateway charges you.
+        sell_price is what this gateway charges you. Pass resource_id to
+        ``call(...)`` to invoke a result.
         """
         params: dict[str, Any] = {"limit": limit}
         if query:
@@ -97,9 +99,35 @@ class FederationClient(BaseClient):
     def execute(self, request: dict[str, Any]) -> dict[str, Any]:
         """Invoke a federated resource; the gateway settles with the peer.
 
+        Takes the raw request body. Prefer ``call(resource_id, payload)`` unless
+        you need to set fields this SDK does not model.
+
         Requires an API key or x402 payment (not admin rights).
         """
         return self._post("/v1/federation/execute", json=request)
+
+    def call(
+        self,
+        resource_id: int,
+        payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Invoke a catalogue resource by its ``resource_id``.
+
+        This is the follow-up to ``search(...)``::
+
+            hits = fed.search("google search")
+            result = fed.call(hits[0]["resource_id"], {"query": "x402"})
+
+        ``execute`` takes an untyped body, so a caller had to know the key is
+        ``resource_id`` rather than ``id``. This wraps it.
+
+        Requires an API key or x402 payment.
+        """
+        # bool is excluded explicitly: it subclasses int, so True would otherwise be
+        # accepted and sent as resource_id=1 -- a request for someone else's resource.
+        if isinstance(resource_id, bool) or not isinstance(resource_id, int) or resource_id <= 0:
+            raise ValueError(f"resource_id must be a positive int, got {resource_id!r}")
+        return self.execute({"resource_id": resource_id, "payload": payload or {}})
 
     # ─── Peer management (admin only) ─────────────────────────────────────────
 
