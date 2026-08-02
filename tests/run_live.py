@@ -6,8 +6,17 @@ import time
 # Fix Windows console encoding
 sys.stdout.reconfigure(encoding='utf-8', errors='replace')
 
-API_KEY = os.environ.get("JARVISCLAW_API_KEY", "sk-OtqnrUGuNoROqKbJR9IlUFbQclLSH2vFWsvjMnR5744ZHMF0")
-WALLET_KEY = os.environ.get("JARVISCLAW_WALLET_KEY", "7cZPrSVhfVX7Ny8XRcsnkjfDHZNW926oUajAUpFaVgi7ADABRqLX1wVyc5Wgn89EuUrPkJVtKYVVpks5ZUsgoyt")
+# Environment only, with no defaults. These held a live API key and a base58 Solana
+# SECRET KEY in plaintext — in a public SDK repo. The wallet key signs transfers, so a
+# default here means an accidental run spends a real wallet.
+#
+# No fallback on purpose: a default is exactly what let these get committed, since the
+# variable is then never empty and nothing ever forces the operator to supply a value.
+API_KEY = os.environ.get("JARVISCLAW_API_KEY", "")
+WALLET_KEY = os.environ.get("JARVISCLAW_WALLET_KEY", "")
+
+if not API_KEY:
+    sys.exit("JARVISCLAW_API_KEY is required (export it; do not hardcode it)")
 
 PASS = 0
 FAIL = 0
