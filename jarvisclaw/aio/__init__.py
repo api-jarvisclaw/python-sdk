@@ -28,6 +28,7 @@ from .client import AsyncSearchClient as SearchClient
 from .client import AsyncMarketplaceClient as MarketplaceClient
 from .client import AsyncWalletClient as WalletClient
 from .client import AsyncIntentClient as IntentClient
+from .federation import AsyncFederationClient as FederationClient
 
 __all__ = [
     "ChatClient",
@@ -38,4 +39,5 @@ __all__ = [
     "MarketplaceClient",
     "WalletClient",
     "IntentClient",
+    "FederationClient",
 ]

@@ -14,10 +14,13 @@ import os
 import pytest
 
 BASE_URL = "https://api.jarvisclaw.ai"
-API_KEY = os.environ.get(
-    "JARVISCLAW_API_KEY", "sk-OtqnrUGuNoROqKbJR9IlUFbQclLSH2vFWsvjMnR5744ZHMF0"
-)
+# No default: a live key was hardcoded here. WALLET_KEY already read from the environment
+# with an empty default, and skip_no_wallet below is the pattern to follow — an unset
+# credential skips rather than silently billing someone's account.
+API_KEY = os.environ.get("JARVISCLAW_API_KEY", "")
 WALLET_KEY = os.environ.get("JARVISCLAW_WALLET_KEY", "")
+
+skip_no_key = pytest.mark.skipif(not API_KEY, reason="JARVISCLAW_API_KEY not set")
 
 skip_no_wallet = pytest.mark.skipif(
     not WALLET_KEY, reason="JARVISCLAW_WALLET_KEY not set"

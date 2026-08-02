@@ -10,7 +10,7 @@ Only tests the specific failures from test_report_2026-06-06.md:
 - Async streaming
 
 Run:
-  export JARVISCLAW_API_KEY=sk-OtqnrUGuNoROqKbJR9IlUFbQclLSH2vFWsvjMnR5744ZHMF0
+  export JARVISCLAW_API_KEY=<your_api_key>
   export JARVISCLAW_WALLET_KEY=<your_wallet_private_key>
   export JARVISCLAW_BASE_URL=https://api.jarvisclaw.ai
   pytest tests/test_regression.py -v -s
