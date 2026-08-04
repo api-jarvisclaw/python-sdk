@@ -52,6 +52,10 @@ def test_readme_methods_exist():
         "daily_trend", "discover", "discover_peers", "crawl_network",
         "search_federation", "federation_execute", "resolve_natural",
         "network_stats", "balance", "get_balance",
+        # The discovery-to-invocation path on the unified client. search_federation
+        # and federation_execute existed, with nothing between them: the first hands
+        # back a resource_id and the second wants a hand-built body naming it.
+        "list_apis", "call_resource", "invoke_resource",
     ]
     missing = [n for n in documented if not hasattr(JarvisClaw, n)]
     assert not missing, f"documented but missing: {missing}"

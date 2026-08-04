@@ -168,11 +168,29 @@ async def test_invoke_get_sends_payload_as_query():
 
 
 @pytest.mark.asyncio
-async def test_invoke_post_with_no_payload_sends_empty_object():
+async def test_invoke_post_with_no_payload_sends_no_body():
+    # This asserted an empty JSON object, and that was the wrong shape.
+    #
+    # The gateway distinguishes an absent body from an empty one on purpose: its
+    # readFederationPayload keeps an empty body nil, and execute only forwards a
+    # payload upstream when one is present, because sending "{}" to an endpoint that
+    # expects no body is a real difference to some upstreams. Sending {} for a caller
+    # who passed nothing removed any way to express "no body".
     handler, seen = recorder({"ok": True})
     fed = client_with(handler)
 
     await fed.invoke(64)
+
+    assert seen["request"].content == b"", "no payload must mean no body, not {}"
+
+
+@pytest.mark.asyncio
+async def test_invoke_post_forwards_an_explicitly_empty_payload():
+    # The other half: {} passed deliberately must still travel as {}.
+    handler, seen = recorder({"ok": True})
+    fed = client_with(handler)
+
+    await fed.invoke(64, payload={})
 
     assert json.loads(seen["request"].content) == {}
 
@@ -265,13 +283,26 @@ async def test_call_wraps_execute_with_resource_id_key():
 
 
 @pytest.mark.asyncio
-async def test_call_defaults_payload_to_empty_object():
+async def test_call_omits_payload_when_there_is_none():
+    # Same absent-vs-empty distinction as invoke; see that test for why.
     handler, seen = recorder({"success": True})
     fed = client_with(handler)
 
     await fed.call(476)
 
-    assert json.loads(seen["request"].content)["payload"] == {}
+    body = json.loads(seen["request"].content)
+    assert body == {"resource_id": 476}, "an absent payload must not be invented"
+    assert "payload" not in body
+
+
+@pytest.mark.asyncio
+async def test_call_forwards_an_explicitly_empty_payload():
+    handler, seen = recorder({"success": True})
+    fed = client_with(handler)
+
+    await fed.call(476, {})
+
+    assert json.loads(seen["request"].content) == {"resource_id": 476, "payload": {}}
 
 
 @pytest.mark.parametrize("bad", [0, -1, "476", None, True, 1.5])

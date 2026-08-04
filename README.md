@@ -200,7 +200,10 @@ up tagged `api_source="aip"`. The gateway has no budget endpoint, so
 `budget_status` derives its figures locally from `spend()` — the limits you pass
 are the ones compared against, not values stored server-side.
 
-## Federation — Peer Discovery
+## Federation — Discovery and Invocation
+
+Around 2,700 callable endpoints from peer gateways. Discovery is public;
+invocation settles on-chain.
 
 ```python
 # Public registry — no auth needed
@@ -211,11 +214,35 @@ for peer in peers["data"]:
 # Search callable resources across the federation
 found = client.search_federation("crypto price", limit=10)
 for r in found["data"]:
-    print(f"{r['server_name']} {r['method']} {r['path']} — ${r['sell_price']}")
+    print(f"{r['method']} {r['path']} — ${r['sell_price']}  (id {r['resource_id']})")
 
-# Invoke one; the gateway settles with the peer on your behalf
-result = client.federation_execute({"resource_id": 42, "payload": {...}})
+# The marketplace view of the same capacity: marketplace pricing, unpriced
+# (therefore uncallable) rows excluded, plus category counts for a filter UI.
+page = client.list_apis(page_size=50, keyword="qr")
+print(page["total"], len(page["categories"]))
+
+# resource_id from any listing is the handle both call paths take.
+rid = found["data"][0]["resource_id"]
+
+# Returns the upstream body directly.
+body = client.invoke_resource(rid, {"url": "https://example.com/a.png"})
+
+# Keeps execute's envelope, which is where tx_hash and cost_usd live.
+result = client.call_resource(rid, {"url": "https://example.com/a.png"})
+if not result["success"]:
+    print("charged, upstream refused:", result["status_code"])
+
+# The raw escape hatch, for fields the wrappers do not model.
+result = client.federation_execute({"resource_id": rid, "payload": {...}, "headers": {...}})
 ```
+
+`call_resource` reports an upstream failure as `success: False` in the body rather
+than raising — the charge has settled by then, so check the field instead of
+assuming no exception means the upstream answered.
+
+Passing no payload sends no body at all, which is not the same as `{}`: some
+upstreams treat an empty object differently from an absent one, so the
+distinction is preserved rather than normalised.
 
 Peer *management* is admin-only:
 
