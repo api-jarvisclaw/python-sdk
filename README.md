@@ -357,13 +357,25 @@ Pay per-request with on-chain USDC. No API key, no account needed:
 # EVM (Base network)
 client = JarvisClaw(private_key="0x...")
 
-# Solana
-client = JarvisClaw(private_key="base58...", network="solana")
+# Solana — the rail is detected from the key's encoding, so `network` is only
+# needed to override that detection.
+client = JarvisClaw(private_key="base58...")
 
 # Check balance — reads the wallet's on-chain USDC directly, on Base for an EVM
 # key and on Solana mainnet for a base58 key.
 balance = client.get_balance()
 print(f"Wallet balance: ${balance:.2f} USDC")
+```
+
+Either credential works on every client, and the choice is independent of what
+you call:
+
+```python
+from jarvisclaw import ChatClient, FederationClient, MarketplaceClient
+
+ChatClient(api_key="sk-...")             # managed billing
+FederationClient(private_key="0x...")    # x402 on Base
+MarketplaceClient(private_key="base58...")  # x402 on Solana
 ```
 
 Solana support needs the extra: `pip install jarvisclaw[solana]`. EVM x402 needs
@@ -417,6 +429,22 @@ print(message.content[0].text)
 | `JARVISCLAW_API_KEY` | API key authentication |
 | `JARVISCLAW_WALLET_KEY` | x402 private key (EVM or Solana) |
 | `JARVISCLAW_BASE_URL` | Custom endpoint (default: `https://api.jarvisclaw.ai`) |
+
+## What's new in 3.1.1
+
+**Added:** the unified `JarvisClaw` client can now go from discovering a federated
+resource to calling one. It had `search_federation` (which returns a
+`resource_id`) and `federation_execute` (which wants a hand-built body naming it)
+with nothing in between, and no way to list the marketplace catalogue at all —
+`FederationClient` had the wrappers, but the client the docs point you at did not.
+Adds `list_apis`, `call_resource` and `invoke_resource`, named to match the Go SDK.
+
+**Fixed:** `call()` and `invoke()` sent `payload or {}`, so passing no payload
+became an empty JSON object. The gateway distinguishes the two deliberately — it
+forwards a body upstream only when one is present, because `{}` is a real
+difference to an upstream expecting no input — so there was no way to express "no
+body". An absent payload is now omitted; an explicitly empty one still travels.
+Applies to the sync and async clients alike.
 
 ## What's new in 3.1.0
 
