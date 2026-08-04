@@ -147,7 +147,12 @@ class FederationClient(BaseClient):
         path = f"/v1/marketplace/api/{resource_id}"
         if method.upper() == "GET":
             return self._get(path, params=payload or {})
-        return self._post(path, json=payload or {})
+        # No body at all when there is no payload, rather than "{}". The gateway keeps an
+        # absent body absent on purpose (readFederationPayload), because an empty object
+        # is a real difference to an upstream that expects no input.
+        if payload is None:
+            return self._post(path)
+        return self._post(path, json=payload)
 
     def execute(self, request: dict[str, Any]) -> dict[str, Any]:
         """Invoke a federated resource; the gateway settles with the peer.
@@ -187,7 +192,11 @@ class FederationClient(BaseClient):
         # accepted and sent as resource_id=1 -- a request for someone else's resource.
         if isinstance(resource_id, bool) or not isinstance(resource_id, int) or resource_id <= 0:
             raise ValueError(f"resource_id must be a positive int, got {resource_id!r}")
-        return self.execute({"resource_id": resource_id, "payload": payload or {}})
+        body: dict[str, Any] = {"resource_id": resource_id}
+        # Omitted rather than sent as {} when absent, for the reason given in invoke.
+        if payload is not None:
+            body["payload"] = payload
+        return self.execute(body)
 
     # ─── Peer management (admin only) ─────────────────────────────────────────
 

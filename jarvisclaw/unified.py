@@ -518,12 +518,99 @@ class JarvisClaw(BaseClient):
             params["category"] = category
         return self._get("/v1/federation/search", params=params)
 
+    def list_apis(
+        self,
+        *,
+        page: int = 1,
+        page_size: int = 50,
+        category: str | None = None,
+        keyword: str | None = None,
+    ) -> dict[str, Any]:
+        """List the marketplace API catalogue, paginated. Public, no auth required.
+
+        The customer-facing view of the same capacity ``search_federation`` covers:
+        priced in marketplace terms, with anything unpriced excluded — an unpriced
+        row settles zero from you while the gateway still pays the upstream, so it
+        is not callable and does not appear here.
+
+        Returns dict with: items, total, page, page_size, categories. The
+        ``{"success", "data"}`` envelope is unwrapped, matching ``network_stats``.
+        """
+        params: dict[str, Any] = {"page": page, "page_size": page_size}
+        if category is not None:
+            params["category"] = category
+        if keyword is not None:
+            params["q"] = keyword
+        resp = self._get("/api/marketplace/apis", params=params)
+        if isinstance(resp, dict) and "data" in resp:
+            return resp["data"]
+        return resp
+
     def federation_execute(self, request: dict[str, Any]) -> dict[str, Any]:
         """Invoke a federated resource; the gateway settles with the peer.
+
+        Takes the raw request body, so it can set fields this SDK does not model.
+        For the common case use ``call_resource``, which builds the body, or
+        ``invoke_resource``, which returns the upstream body unwrapped.
 
         Requires an API key or x402 payment.
         """
         return self._post("/v1/federation/execute", json=request)
+
+    def call_resource(
+        self,
+        resource_id: int,
+        payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Invoke a catalogue resource by the id a listing handed back.
+
+        The follow-up to ``search_federation`` / ``list_apis``::
+
+            hits = client.search_federation("qr code")["data"]
+            out = client.call_resource(hits[0]["resource_id"], {"url": "..."})
+
+        Keeps execute's envelope: success, status_code, response_body, tx_hash,
+        cost_usd, latency_ms. A non-2xx upstream comes back as ``success: False``
+        with the charge already settled, so check the field rather than assuming
+        no exception means the upstream answered.
+
+        Requires an API key or x402 payment.
+        """
+        # bool is excluded explicitly: it subclasses int, so True would otherwise be
+        # accepted and sent as resource_id=1 -- a request for someone else's resource.
+        if isinstance(resource_id, bool) or not isinstance(resource_id, int) or resource_id <= 0:
+            raise ValueError(f"resource_id must be a positive int, got {resource_id!r}")
+        body: dict[str, Any] = {"resource_id": resource_id}
+        # Omitted rather than sent as {} when absent: the execute path only forwards a
+        # body when one is present, and an empty object is a real difference to some
+        # upstreams.
+        if payload is not None:
+            body["payload"] = payload
+        return self.federation_execute(body)
+
+    def invoke_resource(
+        self,
+        resource_id: int,
+        payload: dict[str, Any] | None = None,
+    ) -> Any:
+        """Call a catalogue resource and get the upstream body back directly.
+
+        The difference from ``call_resource`` is the envelope, not the billing:
+        both adapt onto the same execute path, which owns settlement. This one
+        returns the upstream's own body, so a caller needs to know nothing about
+        the federation subsystem; ``call_resource`` keeps the wrapper, which is
+        where tx_hash and cost_usd live.
+
+        Requires an API key or x402 payment.
+        """
+        if isinstance(resource_id, bool) or not isinstance(resource_id, int) or resource_id <= 0:
+            raise ValueError(f"resource_id must be a positive int, got {resource_id!r}")
+        # No body at all when payload is None, rather than "{}". The gateway keeps an
+        # absent body absent on purpose (readFederationPayload), because an empty
+        # object is a real difference to an upstream that expects no input.
+        if payload is None:
+            return self._post(f"/v1/marketplace/api/{resource_id}")
+        return self._post(f"/v1/marketplace/api/{resource_id}", json=payload)
 
     def crawl_network(self) -> dict[str, Any]:
         """Trigger an immediate crawl of every registered federation peer.

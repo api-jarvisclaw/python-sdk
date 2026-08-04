@@ -58,15 +58,40 @@ for p in rows:
     print(f"  {p.get('name', '?'):<32} {health:<5} {p.get('resource_count', 0)} resources")
 
 # --- Federated search -------------------------------------------------------
-# Search across every peer's advertised resources at once.
+# Search across every peer's advertised resources at once. Each hit carries a
+# resource_id, which is the handle the two invocation wrappers below take.
 try:
     hits = jc.search_federation("video generation", limit=5)
     found = hits.get("data") or []
     print(f"\nFederated search hits: {len(found)}")
     for h in found[:5]:
-        print(f"  {str(h.get('name'))[:60]}")
+        print(f"  #{h.get('resource_id'):<6} {str(h.get('name'))[:50]} ${h.get('sell_price')}")
 except APIError as e:
     print(f"\nFederated search failed [{e.status_code}]: {e.message[:80]}")
+
+# --- The marketplace catalogue ----------------------------------------------
+# The same capacity in marketplace terms: unpriced (therefore uncallable) rows
+# excluded, plus category counts so a filter needs no extra fetch.
+page = jc.list_apis(page_size=5, keyword="qr")
+print(f"\nCatalogue matches for \"qr\": {page['total']} total")
+for item in page["items"]:
+    print(f"  #{item['resource_id']:<6} {item['name'][:30]:<30} ${item['display_price']}/{item['price_unit']}")
+
+# --- Invoking a federated resource (spends — uncomment to run) ---------------
+#
+# Both settle on-chain. They differ only in the envelope:
+#
+#   body = jc.invoke_resource(page["items"][0]["resource_id"], {"url": "..."})
+#     -> the upstream's own response, nothing to unwrap
+#
+#   out = jc.call_resource(page["items"][0]["resource_id"], {"url": "..."})
+#     -> execute's envelope: success, status_code, response_body, tx_hash, cost_usd
+#
+# call_resource reports an upstream failure as success=False rather than raising,
+# because the charge has already settled by then:
+#
+#   if not out["success"]:
+#       print("charged, upstream refused:", out["status_code"])
 
 # --- Executing work (spends — uncomment to run) -----------------------------
 #
