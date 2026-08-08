@@ -1,6 +1,6 @@
-"""Tests for jarvisclaw.aio.FederationClient.
+"""Tests for jarvisclaw.aio.NetworkClient.
 
-The async SDK had no federation surface at all, so an async application had to drop to raw
+The async SDK had no AIP network surface at all, so an async application had to drop to raw
 httpx or block its event loop on the sync client.
 
 These use httpx.MockTransport rather than a mocking library: it ships with httpx (already a
@@ -15,12 +15,12 @@ import json
 import httpx
 import pytest
 
-from jarvisclaw.aio import FederationClient
+from jarvisclaw.aio import NetworkClient
 from jarvisclaw.auth import APIKeyAuth
 from jarvisclaw.errors import APIError
 
 
-def client_with(handler) -> FederationClient:
+def client_with(handler) -> NetworkClient:
     """Build a client whose transport is handler, recording what it was asked for.
 
     __new__ + manual field assignment rather than the constructor. AsyncBaseClient.__init__
@@ -29,7 +29,7 @@ def client_with(handler) -> FederationClient:
     this file into a two-minute run for tests that never touch the network. Nothing under test
     here lives in __init__; auth resolution has its own coverage.
     """
-    fed = FederationClient.__new__(FederationClient)
+    fed = NetworkClient.__new__(NetworkClient)
     fed._auth = APIKeyAuth("sk-test")
     fed.base_url = "https://api.example.test"
     fed.timeout = 30
@@ -318,26 +318,26 @@ async def test_call_rejects_bad_resource_id(bad):
 # ─── Parity with the sync client ──────────────────────────────────────────────
 
 
-def test_async_client_covers_every_sync_federation_method():
+def test_async_client_covers_every_sync_network_method():
     """A partial async port is worse than none: callers hit AttributeError at runtime."""
-    from jarvisclaw import FederationClient as Sync
+    from jarvisclaw import NetworkClient as Sync
 
-    def federation_methods(cls):
-        # Only methods defined on the federation class itself — the base client contributes
+    def network_methods(cls):
+        # Only methods defined on the network class itself — the base client contributes
         # transport helpers that have no business being compared.
         return {n for n, v in vars(cls).items() if callable(v) and not n.startswith("_")}
 
-    missing = federation_methods(Sync) - federation_methods(FederationClient)
+    missing = network_methods(Sync) - network_methods(NetworkClient)
     assert not missing, f"async client is missing: {sorted(missing)}"
 
 
-def test_every_async_federation_method_is_a_coroutine():
+def test_every_async_network_method_is_a_coroutine():
     """A def that should have been async def blocks the event loop and returns a plain value."""
     import inspect
 
-    for name, fn in vars(FederationClient).items():
+    for name, fn in vars(NetworkClient).items():
         if not callable(fn) or name.startswith("_"):
             continue
-        if isinstance(vars(FederationClient)[name], staticmethod):
+        if isinstance(vars(NetworkClient)[name], staticmethod):
             continue
         assert inspect.iscoroutinefunction(fn), f"{name} is not async"

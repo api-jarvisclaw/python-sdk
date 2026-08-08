@@ -28,7 +28,11 @@ from .client import AsyncSearchClient as SearchClient
 from .client import AsyncMarketplaceClient as MarketplaceClient
 from .client import AsyncWalletClient as WalletClient
 from .client import AsyncIntentClient as IntentClient
-from .federation import AsyncFederationClient as FederationClient
+from .network import AsyncNetworkClient as NetworkClient
+# Deprecated: FederationClient is the pre-rename name for NetworkClient. Importable
+# but kept out of __all__ on purpose -- __all__ is the recommended surface, and
+# tests/test_dual_credentials.py requires every name there to have its own coverage.
+from .network import AsyncNetworkClient as FederationClient  # noqa: F401
 
 __all__ = [
     "ChatClient",
@@ -39,5 +43,5 @@ __all__ = [
     "MarketplaceClient",
     "WalletClient",
     "IntentClient",
-    "FederationClient",
+    "NetworkClient",
 ]

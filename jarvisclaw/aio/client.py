@@ -892,10 +892,10 @@ class AsyncIntentClient(AsyncBaseClient):
         return await self._request("DELETE", f"/v1/intent/subscribe/{subscription_id}")
 
     async def network_stats(self) -> dict[str, Any]:
-        """Get provider and federation counts. Public, no auth required.
+        """Get provider and network counts. Public, no auth required.
 
         Returns total_providers, by_source, intent_types (a count) and
-        federation counts. The {"success", "data"} envelope is unwrapped.
+        network counts. The {"success", "data"} envelope is unwrapped.
         """
         resp = await self._get("/v1/network/stats")
         if isinstance(resp, dict) and "data" in resp:
