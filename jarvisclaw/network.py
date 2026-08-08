@@ -11,7 +11,10 @@ class NetworkClient(BaseClient):
 
     Two groups of endpoints live here:
 
-    - The public registry (search, servers, resources) needs no auth at all.
+    - The public registry (search, servers, resources) is not credential-checked
+      server-side: any key reaches it, and the response is the same for everyone.
+      You still pass a credential to the constructor — BaseClient requires one
+      regardless of which endpoints you go on to call.
     - Peer management (list_peers, add_peer, remove_peer, crawl) sits behind
       AdminAuth, which requires a dashboard session or an access token plus a
       New-Api-User header. An API key or x402 wallet gets 401 on those, by
@@ -25,7 +28,7 @@ class NetworkClient(BaseClient):
         servers = fed.list_servers()             # public
     """
 
-    # ─── Public registry (no auth) ────────────────────────────────────────────
+    # ─── Public registry (not credential-checked server-side) ─────────────────
 
     def search(
         self,
@@ -93,7 +96,7 @@ class NetworkClient(BaseClient):
         return self._get("/v1/federation/resources", params=params)
 
     def health(self) -> dict[str, Any]:
-        """Get network health status. Public, no auth required."""
+        """Get network health status. Public: not credential-checked server-side."""
         return self._get("/v1/federation/health")
 
     # ─── API catalogue and direct invocation ──────────────────────────────────
@@ -106,7 +109,8 @@ class NetworkClient(BaseClient):
         category: str | None = None,
         keyword: str | None = None,
     ) -> dict[str, Any]:
-        """List the marketplace API catalogue, paginated. Public, no auth required.
+        """List the marketplace API catalogue, paginated. Public: not
+        credential-checked server-side.
 
         The customer-facing view of the same capacity list_resources returns: priced in
         marketplace terms, and excluding anything without a usable price.
