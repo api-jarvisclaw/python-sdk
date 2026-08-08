@@ -35,7 +35,7 @@ CLIENT_NAMES = [
     "UserAPIClient",
     "WalletClient",
     "IntentClient",
-    "FederationClient",
+    "NetworkClient",
     "PromptCoachClient",
 ]
 

@@ -200,7 +200,7 @@ up tagged `api_source="aip"`. The gateway has no budget endpoint, so
 `budget_status` derives its figures locally from `spend()` — the limits you pass
 are the ones compared against, not values stored server-side.
 
-## Federation — Discovery and Invocation
+## AIP Network — Discovery and Invocation
 
 Around 2,700 callable endpoints from peer gateways. Discovery is public;
 invocation settles on-chain.
@@ -211,8 +211,8 @@ peers = client.discover_peers()
 for peer in peers["data"]:
     print(f"{peer['name']} — {peer['base_url']} (healthy={peer['healthy']})")
 
-# Search callable resources across the federation
-found = client.search_federation("crypto price", limit=10)
+# Search callable APIs across the network
+found = client.network_search("crypto price", limit=10)
 for r in found["data"]:
     print(f"{r['method']} {r['path']} — ${r['sell_price']}  (id {r['resource_id']})")
 
@@ -233,7 +233,7 @@ if not result["success"]:
     print("charged, upstream refused:", result["status_code"])
 
 # The raw escape hatch, for fields the wrappers do not model.
-result = client.federation_execute({"resource_id": rid, "payload": {...}, "headers": {...}})
+result = client.network_execute({"resource_id": rid, "payload": {...}, "headers": {...}})
 ```
 
 `call_resource` reports an upstream failure as `success: False` in the body rather
@@ -247,9 +247,9 @@ distinction is preserved rather than normalised.
 Peer *management* is admin-only:
 
 ```python
-from jarvisclaw import FederationClient
+from jarvisclaw import NetworkClient
 
-fed = FederationClient(api_key="sk-...")
+fed = NetworkClient(api_key="sk-...")
 fed.add_peer("peer.example.com")     # POST, domain in the body
 fed.remove_peer("peer.example.com")  # DELETE, domain in the body — not an id
 fed.crawl()                          # crawls every registered peer; takes no seeds
@@ -371,10 +371,10 @@ Either credential works on every client, and the choice is independent of what
 you call:
 
 ```python
-from jarvisclaw import ChatClient, FederationClient, MarketplaceClient
+from jarvisclaw import ChatClient, NetworkClient, MarketplaceClient
 
 ChatClient(api_key="sk-...")             # managed billing
-FederationClient(private_key="0x...")    # x402 on Base
+NetworkClient(private_key="0x...")    # x402 on Base
 MarketplaceClient(private_key="base58...")  # x402 on Solana
 ```
 
@@ -418,7 +418,7 @@ print(message.content[0].text)
 ```
 
 > **When to use which?**
-> - `JarvisClaw` — intent routing, x402 payments, budget control, federation
+> - `JarvisClaw` — intent routing, x402 payments, budget control, AIP network
 > - `Agent` — autonomous multi-step tasks with tools
 > - `openai`/`anthropic` SDK — drop-in for existing code, Claude/GPT native features
 
@@ -436,7 +436,7 @@ print(message.content[0].text)
 resource to calling one. It had `search_federation` (which returns a
 `resource_id`) and `federation_execute` (which wants a hand-built body naming it)
 with nothing in between, and no way to list the marketplace catalogue at all —
-`FederationClient` had the wrappers, but the client the docs point you at did not.
+`NetworkClient` had the wrappers, but the client the docs point you at did not.
 Adds `list_apis`, `call_resource` and `invoke_resource`, named to match the Go SDK.
 
 **Fixed:** `call()` and `invoke()` sent `payload or {}`, so passing no payload
@@ -516,7 +516,7 @@ unwrapped data object with `score_before` / `score_after` as ints.
 **Discover.** The body keys are `intent`, `features` and `max_price` — the old
 `intent_type`, `protocol` and `min_uptime` were never read by the server.
 
-**Federation.** `crawl()` takes no arguments; the server crawls every registered
+**Network.** `crawl()` takes no arguments; the server crawls every registered
 peer. `remove_peer(domain)` sends the domain in the body. `list_peers()` returns
 the list directly, with camelCase keys.
 

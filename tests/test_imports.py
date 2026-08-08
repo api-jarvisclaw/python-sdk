@@ -50,10 +50,10 @@ def test_readme_methods_exist():
         "resolve", "execute", "execute_budget", "stream", "subscribe",
         "audit", "audit_log", "budget_status", "spend", "model_breakdown",
         "daily_trend", "discover", "discover_peers", "crawl_network",
-        "search_federation", "federation_execute", "resolve_natural",
+        "network_search", "network_execute", "resolve_natural",
         "network_stats", "balance", "get_balance",
-        # The discovery-to-invocation path on the unified client. search_federation
-        # and federation_execute existed, with nothing between them: the first hands
+        # The discovery-to-invocation path on the unified client. network_search
+        # and network_execute existed, with nothing between them: the first hands
         # back a resource_id and the second wants a hand-built body naming it.
         "list_apis", "call_resource", "invoke_resource",
     ]
@@ -123,3 +123,40 @@ def test_version_matches_pyproject():
     import jarvisclaw
 
     assert jarvisclaw.__version__ == pyproject_version
+
+
+def test_federation_aliases_still_resolve():
+    """The pre-rename federation names must keep working.
+
+    The gateway renamed its public surface from "federation" to "network" in
+    2026-08, so the SDK followed. Code pinned to the old names is still out
+    there, and nothing else in the suite would notice if the shims were dropped
+    during a later cleanup -- the new names would all still pass.
+
+    FederationClient is deliberately absent from __all__: it stays importable
+    without being advertised, and test_dual_credentials asserts every name in
+    __all__ has its own credential coverage.
+    """
+    import jarvisclaw
+    from jarvisclaw import FederationClient, NetworkClient
+    from jarvisclaw.federation import FederationClient as FromOldModule
+    from jarvisclaw.unified import JarvisClaw
+
+    assert FederationClient is NetworkClient
+    assert FromOldModule is NetworkClient
+    assert "FederationClient" not in jarvisclaw.__all__
+
+    assert JarvisClaw.search_federation is JarvisClaw.network_search
+    assert JarvisClaw.federation_execute is JarvisClaw.network_execute
+    assert JarvisClaw.federation_peers is JarvisClaw.discover_peers
+
+
+def test_async_federation_alias_still_resolves():
+    pytest.importorskip("httpx")
+    from jarvisclaw import aio
+    from jarvisclaw.aio.federation import AsyncFederationClient
+    from jarvisclaw.aio.network import AsyncNetworkClient
+
+    assert AsyncFederationClient is AsyncNetworkClient
+    assert aio.FederationClient is AsyncNetworkClient
+    assert "FederationClient" not in aio.__all__

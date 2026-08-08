@@ -1,4 +1,4 @@
-"""Tests for FederationClient's search -> call flow.
+"""Tests for NetworkClient's search -> call flow.
 
 search() returned results without a resource_id and call() did not exist, so the
 obvious flow -- search the catalogue, invoke a hit -- could not be expressed: execute()
@@ -9,12 +9,12 @@ from unittest.mock import patch
 
 import pytest
 
-from jarvisclaw.federation import FederationClient
+from jarvisclaw.network import NetworkClient
 
 
 @pytest.fixture
 def fed():
-    return FederationClient(api_key="sk-test")
+    return NetworkClient(api_key="sk-test")
 
 
 def _mock_response(data, status_code=200):
@@ -150,10 +150,10 @@ class TestInvokePayloadShape:
         assert kwargs["params"] == {"pair": "BTC-USDT"}
 
 
-class TestUnifiedFederationSurface:
+class TestUnifiedNetworkSurface:
     """The unified JarvisClaw client is the documented entry point, so the
     discovery-to-invocation path has to be expressible there too — it had
-    search_federation and a raw federation_execute, and nothing between them."""
+    network_search and a raw network_execute, and nothing between them."""
 
     @pytest.fixture
     def jc(self):

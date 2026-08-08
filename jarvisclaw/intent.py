@@ -271,11 +271,11 @@ class IntentClient(BaseClient):
         return self._post("/v1/intent/resolve/natural", json=body)
 
     def network_stats(self) -> dict[str, Any]:
-        """Get provider and federation counts. Public, no auth required.
+        """Get provider and network counts. Public, no auth required.
 
         Returns dict with: total_providers, by_source ({internal, federation}),
         intent_types (a count, not a list), and federation ({servers,
-        healthy_servers, resources}) when a federation is configured.
+        healthy_servers, resources}) when the AIP network is configured.
 
         The handler wraps this in {"success": ..., "data": ...}; the envelope is
         unwrapped here so callers get the stats directly, matching the Go SDK.

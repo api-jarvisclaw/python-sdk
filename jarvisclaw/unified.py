@@ -1,7 +1,7 @@
 """JarvisClaw — Unified SDK entry point.
 
 This is the single public interface for all JarvisClaw AI operations.
-It combines intent resolution, execution, streaming, analytics, and federation
+It combines intent resolution, execution, streaming, analytics, and network
 into one cohesive client that matches the official documentation.
 
 Usage:
@@ -36,7 +36,7 @@ class JarvisClaw(BaseClient):
     - execute: run an intent with budget control
     - stream: streaming execution via SSE
     - audit: usage analytics and budget tracking
-    - discover: federation peer discovery
+    - discover: AIP network peer discovery
     - balance: check wallet/account balance
 
     Args:
@@ -398,7 +398,7 @@ class JarvisClaw(BaseClient):
             "alerts": alerts,
         }
 
-    # ─── Discovery & Federation ───────────────────────────────────────────────────
+    # ─── Discovery & Network ──────────────────────────────────────────────────────
 
     def discover(
         self,
@@ -467,10 +467,10 @@ class JarvisClaw(BaseClient):
         return self._post("/v1/intent/resolve/natural", json=body)
 
     def network_stats(self) -> dict[str, Any]:
-        """Get provider and federation counts. Public, no auth required.
+        """Get provider and network counts. Public, no auth required.
 
         Returns total_providers, by_source, intent_types (a count) and
-        federation counts. The {"success", "data"} envelope is unwrapped.
+        network counts. The {"success", "data"} envelope is unwrapped.
         """
         resp = self._get("/v1/network/stats")
         if isinstance(resp, dict) and "data" in resp:
@@ -478,7 +478,7 @@ class JarvisClaw(BaseClient):
         return resp
 
     def discover_peers(self, *, page: int = 1, page_size: int = 20) -> dict[str, Any]:
-        """List federation peers from the public registry.
+        """List AIP network peers from the public registry.
 
         Returns dict with: success, data (server_uuid, name, base_url, network,
         verified, resource_count, healthy, last_checked_at, aip_version,
@@ -486,7 +486,7 @@ class JarvisClaw(BaseClient):
 
         Public — no auth required. This is not /v1/aip/federation/peers, which is
         admin-only and needs a dashboard session rather than an API key; see
-        FederationClient.list_peers for that one.
+        NetworkClient.list_peers for that one.
         """
         return self._get(
             "/v1/federation/servers",
@@ -496,14 +496,14 @@ class JarvisClaw(BaseClient):
     # federation_peers() is the older alias for discover_peers().
     federation_peers = discover_peers
 
-    def search_federation(
+    def network_search(
         self,
         query: str = "",
         *,
         category: str | None = None,
         limit: int = 20,
     ) -> dict[str, Any]:
-        """Search callable resources across every known federation peer.
+        """Search callable APIs across every known peer on the AIP network.
 
         Public — no auth required.
 
@@ -518,6 +518,9 @@ class JarvisClaw(BaseClient):
             params["category"] = category
         return self._get("/v1/federation/search", params=params)
 
+    # search_federation() is the pre-rename name for network_search().
+    search_federation = network_search
+
     def list_apis(
         self,
         *,
@@ -528,7 +531,7 @@ class JarvisClaw(BaseClient):
     ) -> dict[str, Any]:
         """List the marketplace API catalogue, paginated. Public, no auth required.
 
-        The customer-facing view of the same capacity ``search_federation`` covers:
+        The customer-facing view of the same capacity ``network_search`` covers:
         priced in marketplace terms, with anything unpriced excluded — an unpriced
         row settles zero from you while the gateway still pays the upstream, so it
         is not callable and does not appear here.
@@ -546,8 +549,8 @@ class JarvisClaw(BaseClient):
             return resp["data"]
         return resp
 
-    def federation_execute(self, request: dict[str, Any]) -> dict[str, Any]:
-        """Invoke a federated resource; the gateway settles with the peer.
+    def network_execute(self, request: dict[str, Any]) -> dict[str, Any]:
+        """Invoke an API on the network; the gateway settles with the peer.
 
         Takes the raw request body, so it can set fields this SDK does not model.
         For the common case use ``call_resource``, which builds the body, or
@@ -557,6 +560,9 @@ class JarvisClaw(BaseClient):
         """
         return self._post("/v1/federation/execute", json=request)
 
+    # federation_execute() is the pre-rename name for network_execute().
+    federation_execute = network_execute
+
     def call_resource(
         self,
         resource_id: int,
@@ -564,9 +570,9 @@ class JarvisClaw(BaseClient):
     ) -> dict[str, Any]:
         """Invoke a catalogue resource by the id a listing handed back.
 
-        The follow-up to ``search_federation`` / ``list_apis``::
+        The follow-up to ``network_search`` / ``list_apis``::
 
-            hits = client.search_federation("qr code")["data"]
+            hits = client.network_search("qr code")["data"]
             out = client.call_resource(hits[0]["resource_id"], {"url": "..."})
 
         Keeps execute's envelope: success, status_code, response_body, tx_hash,
@@ -586,7 +592,7 @@ class JarvisClaw(BaseClient):
         # upstreams.
         if payload is not None:
             body["payload"] = payload
-        return self.federation_execute(body)
+        return self.network_execute(body)
 
     def invoke_resource(
         self,
@@ -598,7 +604,7 @@ class JarvisClaw(BaseClient):
         The difference from ``call_resource`` is the envelope, not the billing:
         both adapt onto the same execute path, which owns settlement. This one
         returns the upstream's own body, so a caller needs to know nothing about
-        the federation subsystem; ``call_resource`` keeps the wrapper, which is
+        the network subsystem; ``call_resource`` keeps the wrapper, which is
         where tx_hash and cost_usd live.
 
         Requires an API key or x402 payment.
@@ -613,14 +619,14 @@ class JarvisClaw(BaseClient):
         return self._post(f"/v1/marketplace/api/{resource_id}", json=payload)
 
     def crawl_network(self) -> dict[str, Any]:
-        """Trigger an immediate crawl of every registered federation peer.
+        """Trigger an immediate crawl of every registered network peer.
 
         Admin-only: POST /v1/aip/federation/crawl sits behind AdminAuth, which
         needs a dashboard session or an access token plus a New-Api-User header.
         An API key or x402 wallet gets 401 here.
 
         The crawl covers all registered peers and takes no seed or depth — register
-        targets first with FederationClient.add_peer.
+        targets first with NetworkClient.add_peer.
 
         Returns dict with: message, peers_crawled, healthy, results.
         """

@@ -22,7 +22,7 @@ from jarvisclaw import (
     BudgetExceededError,
     ChatClient,
     EmbeddingsClient,
-    FederationClient,
+    NetworkClient,
     IntentClient,
     JarvisClaw,
     JarvisClawError,
@@ -392,10 +392,10 @@ def test_prompt_score_uses_optimize(stub):
     assert rec.path == "/v1/prompt-coach/optimize"
 
 
-# ── Federation ────────────────────────────────────────────────────────────────
+# ── AIP Network ───────────────────────────────────────────────────────────────
 
 
-def test_federation_list_peers_unwraps_data(stub):
+def test_network_list_peers_unwraps_data(stub):
     """FederationStatus returns {success, data} with camelCase keys."""
     make, rec, respond = stub
     respond({
@@ -403,7 +403,7 @@ def test_federation_list_peers_unwraps_data(stub):
         "data": [{"id": 1, "name": "peer-a", "url": "https://a.example", "status": "online",
                   "lastSeen": "2026-07-30T00:00:00Z", "resourceCount": 12, "latencyMs": 85}],
     })
-    peers = make(FederationClient).list_peers()
+    peers = make(NetworkClient).list_peers()
 
     assert rec.path == "/v1/aip/federation/peers"
     assert len(peers) == 1
@@ -411,44 +411,44 @@ def test_federation_list_peers_unwraps_data(stub):
     assert peers[0]["status"] == "online"
 
 
-def test_federation_remove_peer_sends_domain_in_body(stub):
+def test_network_remove_peer_sends_domain_in_body(stub):
     """FederationRemovePeer binds {"domain": ...}; there is no :id path param."""
     make, rec, respond = stub
     respond({"message": "peer removed", "domain": "a.example"})
-    make(FederationClient).remove_peer("a.example")
+    make(NetworkClient).remove_peer("a.example")
 
     assert rec.method == "DELETE"
     assert rec.path == "/v1/aip/federation/peers"
     assert rec.json_body == {"domain": "a.example"}
 
 
-def test_federation_crawl_takes_no_seed(stub):
+def test_network_crawl_takes_no_seed(stub):
     """FederationCrawl reads no body; seed_urls/max_depth were never honoured."""
     make, rec, respond = stub
     respond({"message": "crawl completed", "peers_crawled": 3, "healthy": 2, "results": []})
-    result = make(FederationClient).crawl()
+    result = make(NetworkClient).crawl()
 
     assert rec.path == "/v1/aip/federation/crawl"
     assert rec.json_body == {}
     assert result["peers_crawled"] == 3
 
 
-def test_federation_search_public(stub):
+def test_network_search_public(stub):
     make, rec, respond = stub
     respond({"success": True, "count": 1, "data": [{"name": "price", "sell_price": 0.002,
                                                     "server_name": "peer-a"}]})
-    results = make(FederationClient).search("price", limit=5)
+    results = make(NetworkClient).search("price", limit=5)
 
     assert rec.path == "/v1/federation/search"
     assert "q=price" in rec.query and "limit=5" in rec.query
     assert results[0]["sell_price"] == 0.002
 
 
-def test_federation_raises_on_success_false(stub):
+def test_network_raises_on_success_false(stub):
     make, _, respond = stub
     respond({"success": False, "message": "db down"})
     with pytest.raises(APIError, match="db down"):
-        make(FederationClient).list_peers()
+        make(NetworkClient).list_peers()
 
 
 def test_unified_discover_peers_is_public_registry(stub):

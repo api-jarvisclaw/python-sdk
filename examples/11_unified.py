@@ -1,7 +1,7 @@
-"""The unified client — one object for intents, analytics, and federation.
+"""The unified client — one object for intents, analytics, and the AIP network.
 
 JarvisClaw() is the agent-facing surface: rather than composing per-capability
-clients, it exposes intent execution, spend analytics and federation discovery
+clients, it exposes intent execution, spend analytics and network discovery
 from a single handle.
 
 Run: python examples/11_unified.py
@@ -52,7 +52,7 @@ print(f"\nNetwork: {net['total_providers']} providers, "
 
 peers = jc.discover_peers(page=1, page_size=5)
 rows = peers.get("data") or []
-print(f"\nFederation peers (showing {len(rows)}):")
+print(f"\nNetwork peers (showing {len(rows)}):")
 for p in rows:
     health = "up" if p.get("healthy") else "down"
     print(f"  {p.get('name', '?'):<32} {health:<5} {p.get('resource_count', 0)} resources")
@@ -61,7 +61,7 @@ for p in rows:
 # Search across every peer's advertised resources at once. Each hit carries a
 # resource_id, which is the handle the two invocation wrappers below take.
 try:
-    hits = jc.search_federation("video generation", limit=5)
+    hits = jc.network_search("video generation", limit=5)
     found = hits.get("data") or []
     print(f"\nFederated search hits: {len(found)}")
     for h in found[:5]:

@@ -32,7 +32,7 @@ python examples/01_chat.py
 | [08_openai_compat.py](08_openai_compat.py) | Drop-in `openai` package replacement | no |
 | [09_marketplace.py](09_marketplace.py) | DeFi data, JSON-RPC, arbitrary services | **yes** |
 | [10_async.py](10_async.py) | Concurrent requests with `jarvisclaw.aio` | no |
-| [11_unified.py](11_unified.py) | Spend analytics, audit, federation discovery | no |
+| [11_unified.py](11_unified.py) | Spend analytics, audit, network discovery | no |
 
 ## Two billing paths, and why some examples need a funded wallet
 

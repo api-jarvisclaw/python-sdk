@@ -28,7 +28,11 @@ from .errors import (
 )
 from .embeddings import EmbeddingsClient
 from .image import ImageClient
-from .federation import FederationClient
+from .network import NetworkClient
+# Deprecated: FederationClient is the pre-rename name for NetworkClient. Importable
+# but kept out of __all__ on purpose -- __all__ is the recommended surface, and
+# tests/test_dual_credentials.py requires every name there to have its own coverage.
+from .network import NetworkClient as FederationClient  # noqa: F401
 from .intent import IntentClient
 from .marketplace import MarketplaceClient
 from .openai_compat import OpenAI
@@ -54,7 +58,7 @@ __all__ = [
     "UserAPIClient",
     "WalletClient",
     "IntentClient",
-    "FederationClient",
+    "NetworkClient",
     "PromptCoachClient",
     "MusicJob",
     "JarvisClawError",
