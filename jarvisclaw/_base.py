@@ -27,6 +27,30 @@ RETRY_STATUS_CODES = {429, 500, 502, 503, 504}
 QUOTA_PER_USD = 500_000
 
 
+
+def _quoted_usd(resp: "requests.Response") -> "float | None":
+    """USD the 402 challenge asks for, or None if it cannot be read.
+
+    None rather than 0.0 on failure: 0.0 would be recorded as "this call was free",
+    which is the one reading that is certainly wrong for a 402. An unreadable quote
+    falls back to token estimation and says so in the log.
+    """
+    try:
+        body = resp.json()
+    except Exception:
+        return None
+    options = body.get("accepts") or body.get("payments") or []
+    if not options:
+        return None
+    raw = options[0].get("amount", options[0].get("maxAmountRequired"))
+    if raw in (None, ""):
+        return None
+    try:
+        # USDC has 6 decimals on every chain the SDK supports.
+        return int(str(raw)) / 1_000_000
+    except (TypeError, ValueError):
+        return None
+
 class BaseClient:
     """Shared HTTP + x402 engine for all JarvisClaw client classes.
 
@@ -93,6 +117,10 @@ class BaseClient:
         self._session = requests.Session()
         self._session_lock = __import__("threading").Lock()
         self._total_spent = 0.0
+        # Price quoted by the most recent 402, pending attribution to a response.
+        # Declared here so the attribute always exists rather than appearing on the
+        # first paid request.
+        self._last_quoted_usd: float | None = None
 
     @property
     def address(self) -> str | None:
@@ -212,6 +240,12 @@ class BaseClient:
 
             # Handle 402 (x402 payment flow)
             if resp.status_code == 402:
+                # Read the quote BEFORE paying. This is the amount that will actually
+                # be charged: x402 prepays a fixed authorisation and never reconciles
+                # down to real usage, so the quote is the price. Recorded here because
+                # this is the only point where it is visible — _track_cost sees usage
+                # tokens and nothing about money.
+                self._last_quoted_usd = _quoted_usd(resp)
                 retry = self._auth.handle_402(
                     resp, method, url, self._session, stream=stream, **kwargs
                 )
@@ -337,20 +371,47 @@ class BaseClient:
         return total
 
     def _track_cost(self, model: str, path: str, usage: dict) -> None:
-        """Record request cost to local log file."""
+        """Record what this request cost, preferring the amount actually paid.
+
+        The flat ``tokens * 0.00001`` this used for every model was not an estimate of
+        anything. Measured against the gateway, one turn on google/gemini-3.5-flash at
+        max_tokens=1536 is charged $0.207405 while that formula reports about $0.0012 —
+        under-reporting the real charge by roughly 170x. A CLI printing
+        "spent: $0.001150" after a wallet had paid $1.47 is worse than printing
+        nothing, because it reads as reassurance.
+
+        So the paid amount is used when there is one. It comes from the 402 quote,
+        which IS the charge under x402: EIP-3009 authorises an exact value that is
+        never settled down to actual usage.
+
+        Token-based estimation remains only for requests that were not paid per call
+        (API-key mode, free models), and is labelled as an estimate so the two are
+        never confused in the log.
+        """
         import json as _json  # noqa: PLC0415
 
         total_tokens = usage.get("total_tokens", 0)
-        estimated_usd = total_tokens * 0.00001
-        self._total_spent += estimated_usd
+        paid_usd = self._last_quoted_usd
+        # Consumed, not carried: the next request on this client must not inherit this
+        # one's price. Leaving it set is how a single paid call would make every later
+        # free call report the same charge.
+        self._last_quoted_usd = None
 
-        entry = {
+        entry: dict = {
             "timestamp": time.time(),
             "model": model,
             "path": path,
             "tokens": total_tokens,
-            "estimated_usd": estimated_usd,
         }
+        if paid_usd is not None:
+            self._total_spent += paid_usd
+            entry["usd"] = paid_usd
+            entry["source"] = "x402_quote"
+        else:
+            estimated_usd = total_tokens * 0.00001
+            self._total_spent += estimated_usd
+            entry["estimated_usd"] = estimated_usd
+            entry["source"] = "token_estimate"
         try:
             log_dir = Path.home() / ".jarvisclaw"
             log_dir.mkdir(exist_ok=True)
