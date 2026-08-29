@@ -588,18 +588,40 @@ class Agent(BaseClient):
             return choices[0].get("message", {}).get("content", "")
         return ""
 
-    @staticmethod
-    def _estimate_cost(resp: dict, model: str) -> float:
-        """Estimate cost from usage field in response."""
+    def _estimate_cost(self, resp: dict, model: str) -> float:
+        """Report what the request cost, preferring the amount actually paid.
+
+        Same correction as BaseClient._track_cost, which this call site missed. The
+        difference is that here the number is not only logged — it feeds
+        CostTracker.over_budget and therefore BudgetExceededError. Under-reporting by
+        the ~170x that the flat ``tokens * 0.00001`` produced meant an agent given
+        ``budget=0.50`` could spend tens of dollars before the guard tripped, which is
+        the opposite of what setting a budget is for.
+
+        Order of preference:
+          1. the x402 quote, when this call was paid per-request — under x402 the quote
+             IS the charge, since EIP-3009 authorises an exact value that is never
+             settled down to actual usage;
+          2. the gateway's own ``total_cost_usd``, when it reports one;
+          3. token-based estimation, only for calls that were not paid per request
+             (API-key mode, free models).
+        """
+        # Consumed, not carried: leaving it set would make every later free call in
+        # this session report the price of the last paid one.
+        paid_usd = self._last_quoted_usd
+        self._last_quoted_usd = None
+        if paid_usd is not None:
+            return paid_usd
+
         usage = resp.get("usage", {})
         if not usage:
             return 0.0
-        # Use server-reported cost if available
+        # Server-reported cost, when present, beats any local guess.
         if "total_cost_usd" in usage:
             return usage["total_cost_usd"]
-        # Fallback: estimate from tokens (rough per-token pricing)
+        # Last resort, and an acknowledged guess: a flat rate that matches no model's
+        # real price. Only reached when nothing was charged per call.
         prompt_tokens = usage.get("prompt_tokens", 0)
         completion_tokens = usage.get("completion_tokens", 0)
-        # Conservative estimate: $0.01/1K tokens average
         total_tokens = prompt_tokens + completion_tokens
         return total_tokens * 0.00001

@@ -147,3 +147,89 @@ class TestTrackCost:
         # Which is the bill the user actually saw, rather than the $0.012 the old
         # formula would have reported for the same six turns.
         assert tracker._total_spent > 1.0
+
+
+class TestAgentCostFeedsTheBudgetGate:
+    """Agent._estimate_cost had the same flat rate, and it is load-bearing there.
+
+    BaseClient._track_cost only writes a log. Agent._estimate_cost feeds
+    CostTracker.over_budget, which raises BudgetExceededError — so under-reporting
+    does not merely misinform, it disables the budget the caller asked for.
+    """
+
+    @pytest.fixture()
+    def agent(self):
+        from jarvisclaw import Agent
+
+        return Agent(api_key="sk-test")
+
+    def test_prefers_the_paid_quote_over_token_math(self, agent):
+        agent._last_quoted_usd = 0.207405
+        # Token math on this usage yields $0.002 — off by ~100x if it wins.
+        cost = agent._estimate_cost(
+            {"usage": {"prompt_tokens": 100, "completion_tokens": 100}},
+            "google/gemini-3.5-flash",
+        )
+        assert cost == pytest.approx(0.207405)
+
+    def test_a_budget_is_breached_by_real_prices_not_estimated_ones(self, agent):
+        from jarvisclaw import BudgetExceededError
+        from jarvisclaw.agent import CostTracker
+
+        tracker = CostTracker(budget_usd=0.50)
+        # Three paid turns at the measured price = $0.62, over a $0.50 budget.
+        for _ in range(3):
+            agent._last_quoted_usd = 0.207405
+            tracker.record(
+                agent._estimate_cost({"usage": {"total_tokens": 200}}, "m"), "m"
+            )
+
+        assert tracker.over_budget, (
+            "three turns at the real $0.207405 exceed a $0.50 budget; under the old "
+            "flat rate they reported $0.006 and the gate never tripped, so an agent "
+            "given budget=0.50 would keep spending"
+        )
+        # And the error a caller sees carries the real figure.
+        err = BudgetExceededError(tracker.budget_usd, tracker.spent_usd)
+        assert err.spent > 0.6
+
+    def test_server_reported_cost_beats_token_math(self, agent):
+        agent._last_quoted_usd = None
+        cost = agent._estimate_cost(
+            {"usage": {"total_tokens": 200, "total_cost_usd": 0.05}}, "m"
+        )
+        assert cost == pytest.approx(0.05)
+
+    def test_a_quote_is_consumed_not_carried(self, agent):
+        # Note the usage shape: this path sums prompt_tokens + completion_tokens.
+        # total_tokens is _track_cost's field and is ignored here.
+        usage = {"usage": {"prompt_tokens": 50, "completion_tokens": 50}}
+        agent._last_quoted_usd = 0.207405
+        first = agent._estimate_cost(usage, "m")
+        second = agent._estimate_cost(usage, "m")
+
+        assert first == pytest.approx(0.207405)
+        assert second == pytest.approx(0.001), (
+            "the second call was not paid per request, so it must fall back to the "
+            "estimate rather than inherit the first call's price"
+        )
+
+    def test_unpaid_calls_still_fall_back_to_token_math(self, agent):
+        # API-key mode and free models produce no quote; reporting 0.0 there would
+        # hide real (if cheap) usage.
+        agent._last_quoted_usd = None
+        cost = agent._estimate_cost(
+            {"usage": {"prompt_tokens": 600, "completion_tokens": 400}}, "m"
+        )
+        assert cost == pytest.approx(0.01)
+
+    def test_usage_without_the_expected_token_fields_reports_nothing(self, agent):
+        # Documents a real sharp edge rather than asserting it is fine: a usage dict
+        # carrying only total_tokens yields 0.0 here, because this path reads
+        # prompt_tokens/completion_tokens. Worth knowing before reusing this helper.
+        agent._last_quoted_usd = None
+        assert agent._estimate_cost({"usage": {"total_tokens": 1000}}, "m") == 0.0
+
+    def test_no_usage_reports_nothing(self, agent):
+        agent._last_quoted_usd = None
+        assert agent._estimate_cost({}, "m") == 0.0
