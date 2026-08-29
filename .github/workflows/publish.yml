@@ -17,11 +17,48 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Check the tag matches the packaged version
+        # Tagging before the release PR merges points the tag at a commit whose
+        # pyproject.toml still says the OLD version. The build then produces that old
+        # version, twine is refused by PyPI for a duplicate, and the failure reads as a
+        # credential or packaging problem rather than "you tagged the wrong commit" —
+        # while the fix you meant to ship is still sitting on an unmerged branch.
+        #
+        # Both files are checked: they are separate copies of the same number, and
+        # __init__.__version__ is what a user sees at runtime.
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          PYPROJECT=$(python -c "import re,io;print(re.search(r'(?m)^version = \"([^\"]+)\"', io.open('pyproject.toml',encoding='utf-8').read()).group(1))")
+          DUNDER=$(python -c "import re,io;print(re.search(r'(?m)^__version__ = \"([^\"]+)\"', io.open('jarvisclaw/__init__.py',encoding='utf-8').read()).group(1))")
+          echo "tag=$TAG pyproject=$PYPROJECT __version__=$DUNDER"
+          fail=0
+          if [ "$TAG" != "$PYPROJECT" ]; then
+            echo "::error::tag v$TAG does not match pyproject.toml version $PYPROJECT — is the release PR merged?"
+            fail=1
+          fi
+          if [ "$TAG" != "$DUNDER" ]; then
+            echo "::error::tag v$TAG does not match jarvisclaw.__version__ $DUNDER"
+            fail=1
+          fi
+          [ "$fail" = 0 ] || exit 1
+          echo "publishing $TAG"
+
       - name: Install build tools
         run: pip install build twine
 
       - name: Build package
         run: python -m build
+
+      - name: Check the built artifact carries the tagged version
+        # The gate above reads the source. This reads what was actually produced, so a
+        # build backend picking up a version from somewhere else cannot slip past.
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          ls -1 dist/
+          if ! ls dist/ | grep -q "^jarvisclaw-${TAG}-py3-none-any\.whl$"; then
+            echo "::error::dist/ has no jarvisclaw-${TAG}-py3-none-any.whl"
+            exit 1
+          fi
 
       - name: Publish to PyPI
         env:
